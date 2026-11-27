@@ -2,6 +2,8 @@
 
 The initial Google Health data-type capability snapshot was cross-checked against the official Google Health data-types documentation and informed by the MIT-licensed `mcp-google-health` reference project by Amit Ray. No implementation code was copied.
 
+The API method descriptions and request/response schema snapshot in `spec/api-methods.json` are generated from Google's public Google Health API discovery documents. Data type names, operation support, and scope mappings in `spec/data-types.json` are derived from Google's public Google Health API documentation. Google documentation and API metadata remain subject to Google's developer site and API terms. Sources: [Google Health REST reference](https://developers.google.com/health/reference/rest), [Google Health data types](https://developers.google.com/health/data-types), and the [v4 discovery document](https://health.googleapis.com/$discovery/rest?version=v4).
+
 MIT License
 
 Copyright (c) 2026 Amit Ray
