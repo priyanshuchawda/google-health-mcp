@@ -9,6 +9,6 @@
   // retained as Worker logs.
   "observability": { "enabled": false },
   "kv_namespaces": [
-    { "binding": "OAUTH_KV", "id": "replace-after-creating-free-kv-namespace" },
+    { "binding": "OAUTH_KV", "id": "6de2f4ef239c49119e1807702f6ae117" },
   ],
 }
