@@ -147,6 +147,10 @@ For local Worker development, copy `.dev.vars.example` to `.dev.vars`; edit only
 
 After deployment, configure the MCP client with the Worker endpoint `https://<worker-name>.<your-subdomain>.workers.dev/mcp` and complete both consent steps. If the account uses Google OAuth Testing mode, refresh tokens can expire under Google's testing rules; configure the OAuth audience appropriately for personal use and verify the current Google policy.
 
+### ChatGPT
+
+From ChatGPT on the web, open **Plugins → Add custom MCP server**, enter the deployed `/mcp` URL, and complete the server OAuth flow followed by the Google Health consent flow. Review the discovered tools before enabling them. OpenAI's current plan availability differs: its Help Center says full read/write MCP access is available on Business, Enterprise, and Edu, while Pro is limited to read/fetch; Plus availability is not promised. Check the current [ChatGPT custom MCP requirements](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt) for your account before relying on write tools. The local stdio mode can also be used with other MCP clients such as Codex.
+
 ## Supported permissions and data
 
 Local authorization is read-only by default. `--write` requests the documented write scopes for available types, but Google may not permit create/update/delete for every type. Each call is capability checked against the checked-in Google documentation snapshot and request schemas from the API discovery documents. Remote authorization has `mcp:read` and optional `mcp:write` scopes; a write-only Google scope is rejected unless the MCP grant also has `mcp:write`.
