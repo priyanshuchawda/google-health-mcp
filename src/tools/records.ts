@@ -6,6 +6,7 @@ import {
 } from "../google-health/capabilities.js";
 import type { HealthApi } from "../google-health/client.js";
 import { buildDateFilter } from "../google-health/filters.js";
+import { normalizeOwnedDataPointName } from "../google-health/resources.js";
 import { toolCatalog } from "./catalog.js";
 import { toolOutputSchema, toolResult } from "./results.js";
 
@@ -29,20 +30,6 @@ const dataSourceFamily = z.enum([
   "self-sources",
 ]);
 const recordSchema = z.record(z.string(), z.unknown());
-
-function requireExactOwnedRecord(recordName: string, parent: string): void {
-  if (
-    !recordName.startsWith(`${parent}/dataPoints/`) ||
-    /\.\.?\//.test(recordName)
-  ) {
-    throw new TypeError(
-      "Record name must identify one record in the requested users/me data type collection.",
-    );
-  }
-  const recordId = recordName.slice(`${parent}/dataPoints/`.length);
-  if (!recordId || recordId.includes("/"))
-    throw new TypeError("Record name must end in one data point identifier.");
-}
 
 function buildSourceFamily(value: z.infer<typeof dataSourceFamily>): string {
   return `users/me/dataSourceFamilies/${value}`;
@@ -148,7 +135,11 @@ export function registerRecordTools(server: McpServer, api: HealthApi): void {
       if (input.operation === "get") {
         if (!input.recordName)
           throw new TypeError("recordName is required when operation is get.");
-        requireExactOwnedRecord(input.recordName, parent);
+        const recordName = await normalizeOwnedDataPointName(
+          api,
+          input.recordName,
+          input.dataType,
+        );
         if (
           input.requestBody ||
           input.start ||
@@ -165,7 +156,7 @@ export function registerRecordTools(server: McpServer, api: HealthApi): void {
           await api.request({
             methodId: "health.users.dataTypes.dataPoints.get",
             apiVersion: input.apiVersion,
-            pathParams: { name: input.recordName },
+            pathParams: { name: recordName },
           }),
         );
       }
@@ -281,17 +272,24 @@ export function registerRecordTools(server: McpServer, api: HealthApi): void {
     },
     async ({ dataType, recordName, record }) => {
       assertOperationAllowed(dataType, "patch");
-      const parent = `users/me/dataTypes/${dataType}`;
-      requireExactOwnedRecord(recordName, parent);
-      if (record["name"] !== undefined && record["name"] !== recordName) {
+      const ownedRecordName = await normalizeOwnedDataPointName(
+        api,
+        recordName,
+        dataType,
+      );
+      if (
+        record["name"] !== undefined &&
+        record["name"] !== recordName &&
+        record["name"] !== ownedRecordName
+      ) {
         throw new TypeError(
           "The record name in the payload must match recordName.",
         );
       }
       const response = await api.request<Record<string, unknown>>({
         methodId: "health.users.dataTypes.dataPoints.patch",
-        pathParams: { name: recordName },
-        body: { ...record, name: recordName },
+        pathParams: { name: ownedRecordName },
+        body: { ...record, name: ownedRecordName },
       });
       return toolResult(writeOperationResult(response));
     },
@@ -323,12 +321,16 @@ export function registerRecordTools(server: McpServer, api: HealthApi): void {
         throw new TypeError(
           "Deletion requires confirm=true after user confirmation.",
         );
+      const ownedRecordNames = await Promise.all(
+        recordNames.map((name) =>
+          normalizeOwnedDataPointName(api, name, dataType),
+        ),
+      );
       const parent = `users/me/dataTypes/${dataType}`;
-      for (const name of recordNames) requireExactOwnedRecord(name, parent);
       const response = await api.request<Record<string, unknown>>({
         methodId: "health.users.dataTypes.dataPoints.batchDelete",
         pathParams: { parent },
-        body: { names: recordNames },
+        body: { names: ownedRecordNames },
       });
       return toolResult(writeOperationResult(response));
     },
@@ -347,10 +349,14 @@ export function registerRecordTools(server: McpServer, api: HealthApi): void {
       outputSchema: toolOutputSchema,
     },
     async ({ recordName }) => {
-      requireExactOwnedRecord(recordName, "users/me/dataTypes/exercise");
+      const ownedRecordName = await normalizeOwnedDataPointName(
+        api,
+        recordName,
+        "exercise",
+      );
       const xml = await api.request<string>({
         methodId: "health.users.dataTypes.dataPoints.exportExerciseTcx",
-        pathParams: { name: recordName },
+        pathParams: { name: ownedRecordName },
         query: { alt: "media" },
         responseType: "text",
       });

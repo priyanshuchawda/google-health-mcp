@@ -34,7 +34,7 @@ The capability registry combines the discovery schema with the reviewed data-typ
 
 ## Summaries and data correctness
 
-Daily metrics use Google's daily rollup endpoint when available. Sleep data uses Google's reconciliation endpoint, because overlapping watch and phone sources should not be summed as if they were independent sessions. The summary includes the requested local date and IANA timezone, uses account settings by default, preserves API units, and reports absent or incomplete values without substituting zero.
+Daily metrics use Google's daily rollup endpoint where supported. Those results use source-recorded civil times; the account's configured IANA time zone is reported as context and does not change the aggregation query. Sleep data uses Google's reconciliation endpoint, because overlapping watch and phone sources should not be summed as if they were independent sessions. Missing rollups remain `null`, stage totals are included only when stage intervals are available and non-overlapping, and optional API failures are reported as unavailable metrics instead of failing the entire summary. A missing or malformed account time zone is shown as unknown rather than silently labeled UTC.
 
 ## Storage and retention
 

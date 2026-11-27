@@ -48,6 +48,16 @@ describe("Google Health API request construction", () => {
     ).toThrow(/unsupported/i);
   });
 
+  it.each([
+    "users/me/../profile",
+    "users/me/%2e%2e/profile",
+    "users/me\\profile",
+  ])("rejects unsafe resource path segments in %s", (name) => {
+    expect(() =>
+      buildHealthUrl("health.users.getProfile", { pathParams: { name } }),
+    ).toThrow(/path|resource|segment/i);
+  });
+
   it("builds the documented TCX download request without allowing arbitrary queries", () => {
     const url = buildHealthUrl(
       "health.users.dataTypes.dataPoints.exportExerciseTcx",
@@ -259,5 +269,31 @@ describe("Google Health API client", () => {
         pathParams: { name: "users/me/profile" },
       }),
     ).rejects.toMatchObject({ name: "HealthApiError" });
+  });
+
+  it("keeps the request timeout active while a response body is being read", async () => {
+    let signal: AbortSignal | undefined;
+    const fetchImpl = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        signal = init?.signal as AbortSignal;
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            signal?.addEventListener("abort", () =>
+              controller.error(new Error("aborted")),
+            );
+          },
+        });
+        return new Response(stream);
+      },
+    );
+    const api = new HealthApi({ tokenProvider, fetchImpl, timeoutMs: 15 });
+
+    await expect(
+      api.request({
+        methodId: "health.users.getProfile",
+        pathParams: { name: "users/me/profile" },
+      }),
+    ).rejects.toMatchObject({ name: "HealthApiError" });
+    expect(signal?.aborted).toBe(true);
   });
 });

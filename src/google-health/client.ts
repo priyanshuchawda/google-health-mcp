@@ -165,56 +165,57 @@ export class HealthApi {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
-    let response: Response;
+    let responseReceived = false;
     try {
-      response = await this.fetchImpl(url, {
+      const response = await this.fetchImpl(url, {
         method: method.httpMethod,
         headers,
         ...(hasBody ? { body: JSON.stringify(request.body) } : {}),
         signal: controller.signal,
         redirect: "error",
       });
-    } catch {
-      throw new HealthApiError({
-        methodId: request.methodId,
-        outcome: methodIsWrite(method) ? "uncertain" : "rejected",
-        message: methodIsWrite(method)
-          ? "Google Health write outcome is uncertain because the network request failed; inspect the record before retrying."
-          : "Google Health request failed before a response was received.",
-      });
-    } finally {
-      clearTimeout(timeout);
-    }
+      responseReceived = true;
 
-    if (!response.ok) {
-      const uncertain = methodIsWrite(method) && response.status >= 500;
-      throw new HealthApiError({
-        methodId: request.methodId,
-        status: response.status,
-        outcome: uncertain ? "uncertain" : "rejected",
-        message: uncertain
-          ? `Google Health returned HTTP ${response.status} after a write request; verify the record before retrying.`
-          : `Google Health rejected ${request.methodId} with HTTP ${response.status}.`,
-      });
-    }
+      if (!response.ok) {
+        const uncertain = methodIsWrite(method) && response.status >= 500;
+        throw new HealthApiError({
+          methodId: request.methodId,
+          status: response.status,
+          outcome: uncertain ? "uncertain" : "rejected",
+          message: uncertain
+            ? `Google Health returned HTTP ${response.status} after a write request; verify the record before retrying.`
+            : `Google Health rejected ${request.methodId} with HTTP ${response.status}.`,
+        });
+      }
 
-    if (response.status === 204) return undefined as T;
-    try {
+      if (response.status === 204) return undefined as T;
       const responseText = await readResponseText(
         response,
         this.maxResponseBytes,
       );
       if (request.responseType === "text") return responseText as T;
       return JSON.parse(responseText) as T;
-    } catch {
+    } catch (error) {
+      if (error instanceof HealthApiError) throw error;
+      const timedOut = controller.signal.aborted;
+      const outcome = methodIsWrite(method) ? "uncertain" : "rejected";
       throw new HealthApiError({
         methodId: request.methodId,
-        status: response.status,
-        outcome: methodIsWrite(method) ? "uncertain" : "rejected",
-        message: methodIsWrite(method)
-          ? "Google Health accepted the write but returned an unreadable response; verify the record before retrying."
-          : "Google Health returned an unreadable response.",
+        outcome,
+        message: timedOut
+          ? methodIsWrite(method)
+            ? "Google Health write outcome is uncertain because the request timed out; verify the record before retrying."
+            : "Google Health request timed out before the response was fully read."
+          : !responseReceived
+            ? methodIsWrite(method)
+              ? "Google Health write outcome is uncertain because the network request failed; inspect the record before retrying."
+              : "Google Health request failed before a response was received."
+            : methodIsWrite(method)
+              ? "Google Health accepted the write but returned an unreadable response; verify the record before retrying."
+              : "Google Health returned an unreadable response.",
       });
+    } finally {
+      clearTimeout(timeout);
     }
   }
 

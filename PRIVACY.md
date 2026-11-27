@@ -14,6 +14,8 @@ When a user invokes a tool, the specific returned data is sent to the MCP client
 
 The remote consent page discloses this data flow before the user proceeds to Google's OAuth consent. Local setup displays the same data flow in the terminal and requires the user to type `AUTHORIZE` before opening Google sign-in. The account owner should preserve that disclosure and make deployment-specific privacy information available to authorized users.
 
+The supplied Cloudflare Worker configuration disables observability and invocation logging. Cloudflare documents invocation logs as including request URLs, and OAuth callback URLs carry short-lived authorization codes. A deployment owner who overrides this setting must review what their logging configuration captures and retains before enabling it.
+
 ## Retention and deletion
 
 The application does not retain health response bodies after a request completes. OAuth grant metadata and encrypted credential properties remain until the user revokes authorization or the configured OAuth store is deleted. To stop Google access, revoke the Google Health grant in the Google Account's third-party connections. To invalidate all remote MCP client grants, disable the Worker and delete its OAuth KV namespace. Local users can delete the configured credentials file and revoke Google access.

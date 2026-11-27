@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { HealthApi } from "../google-health/client.js";
+import { normalizeOwnedDeviceName } from "../google-health/resources.js";
 import { toolCatalog } from "./catalog.js";
 import { toolOutputSchema, toolResult } from "./results.js";
 
@@ -22,15 +23,6 @@ const READ_METHODS: Record<string, string> = {
   devices: "health.users.pairedDevices.list",
   device: "health.users.pairedDevices.get",
 };
-
-function requireDeviceName(name: string): string {
-  if (!/^users\/me\/devices\/[^/]+$/.test(name)) {
-    throw new TypeError(
-      "deviceName must identify one device belonging to users/me.",
-    );
-  }
-  return name;
-}
 
 export function registerProfileTools(server: McpServer, api: HealthApi): void {
   const readTool = toolCatalog.find(
@@ -60,7 +52,9 @@ export function registerProfileTools(server: McpServer, api: HealthApi): void {
         return toolResult(
           await api.request({
             methodId,
-            pathParams: { name: requireDeviceName(deviceName) },
+            pathParams: {
+              name: await normalizeOwnedDeviceName(api, deviceName),
+            },
           }),
         );
       }

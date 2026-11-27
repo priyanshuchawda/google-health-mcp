@@ -80,4 +80,60 @@ describe("daily Google Health summary", () => {
     expect(nextCivilDate("2026-11-30")).toBe("2026-12-01");
     expect(nextCivilDate("2026-12-31")).toBe("2027-01-01");
   });
+
+  it("reports available sleep stage minutes and primary sleep times", () => {
+    const summary = buildDailySummary({
+      date: "2026-11-26",
+      timeZone: "Asia/Kolkata",
+      rollups: {},
+      sleep: {
+        dataPoints: [
+          {
+            name: "users/me/dataTypes/sleep/dataPoints/main",
+            sleep: {
+              interval: {
+                startTime: "2026-11-25T22:00:00Z",
+                endTime: "2026-11-26T02:00:00Z",
+              },
+              summary: { minutesAsleep: "180", minutesInSleepPeriod: "240" },
+              metadata: { mainSleep: true },
+              stages: [
+                {
+                  type: "LIGHT",
+                  startTime: "2026-11-25T22:00:00Z",
+                  endTime: "2026-11-25T23:00:00Z",
+                },
+                {
+                  type: "DEEP",
+                  startTime: "2026-11-25T23:00:00Z",
+                  endTime: "2026-11-26T00:00:00Z",
+                },
+                {
+                  type: "REM",
+                  startTime: "2026-11-26T00:00:00Z",
+                  endTime: "2026-11-26T01:00:00Z",
+                },
+                {
+                  type: "AWAKE",
+                  startTime: "2026-11-26T01:00:00Z",
+                  endTime: "2026-11-26T02:00:00Z",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    expect(summary.metrics.sleepStagesMinutes).toEqual({
+      deep: 60,
+      light: 60,
+      rem: 60,
+      awake: 60,
+    });
+    expect(summary.metrics.primarySleep).toEqual({
+      startTime: "2026-11-25T22:00:00Z",
+      endTime: "2026-11-26T02:00:00Z",
+    });
+  });
 });

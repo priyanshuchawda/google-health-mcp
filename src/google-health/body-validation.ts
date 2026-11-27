@@ -219,7 +219,14 @@ function validateDataPointType(
     !methodId.endsWith(".dataPoints.patch")
   )
     return;
-  const match = pathParams["parent"]?.match(/(?:^|\/)dataTypes\/([^/]+)$/);
+  const resource = methodId.endsWith(".dataPoints.create")
+    ? pathParams["parent"]
+    : pathParams["name"];
+  const match = resource?.match(
+    methodId.endsWith(".dataPoints.create")
+      ? /^users\/(?:me|[A-Za-z0-9-]{1,63})\/dataTypes\/([a-z0-9]+(?:-[a-z0-9]+)*)$/
+      : /^users\/(?:me|[A-Za-z0-9-]{1,63})\/dataTypes\/([a-z0-9]+(?:-[a-z0-9]+)*)\/dataPoints\/[A-Za-z0-9-]{1,63}$/,
+  );
   if (!match || !isObject(body))
     throw new TypeError(
       "Data point writes require a matching data type collection and object payload.",
@@ -247,10 +254,12 @@ function validateDataPointType(
   if (providedName !== undefined) {
     if (
       typeof providedName !== "string" ||
-      !providedName.startsWith(`${pathParams["parent"]}/dataPoints/`)
+      (methodId.endsWith(".dataPoints.create")
+        ? !providedName.startsWith(`${pathParams["parent"]}/dataPoints/`)
+        : providedName !== pathParams["name"])
     ) {
       throw new TypeError(
-        "Data point name must belong to the requested user and data type collection.",
+        "Data point name must match the requested user and data type collection.",
       );
     }
   }

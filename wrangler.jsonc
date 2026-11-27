@@ -4,7 +4,10 @@
   "compatibility_date": "2026-11-27",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "workers_dev": true,
-  "observability": { "enabled": true },
+  // OAuth callback URLs contain short-lived authorization codes. Disable
+  // invocation logging so request URLs and callback query strings are not
+  // retained as Worker logs.
+  "observability": { "enabled": false },
   "kv_namespaces": [
     { "binding": "OAUTH_KV", "id": "replace-after-creating-free-kv-namespace" },
   ],

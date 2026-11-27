@@ -13,9 +13,10 @@ type RollupMap = Readonly<Record<string, JsonRecord>>;
 
 export interface DailySummaryInput {
   date: string;
-  timeZone: string;
+  timeZone: string | null;
   rollups: RollupMap;
   sleep: JsonRecord;
+  unavailableMetrics?: { metric: string; reason: string }[];
 }
 
 const ROLLUP_TYPES = [
@@ -91,10 +92,12 @@ function sleepSessions(sleep: JsonRecord): JsonRecord[] {
 
 export function buildDailySummary(input: DailySummaryInput): JsonRecord {
   dateParts(input.date);
-  try {
-    new Intl.DateTimeFormat("en", { timeZone: input.timeZone });
-  } catch {
-    throw new TypeError("timeZone must be a valid IANA time zone.");
+  if (input.timeZone !== null) {
+    try {
+      new Intl.DateTimeFormat("en", { timeZone: input.timeZone });
+    } catch {
+      throw new TypeError("timeZone must be a valid IANA time zone or null.");
+    }
   }
 
   const steps = readMetric(
@@ -206,11 +209,43 @@ export function buildDailySummary(input: DailySummaryInput): JsonRecord {
           0,
         );
 
+  const stageSegments = ordered.flatMap((session) => {
+    const source = sleepPoints.find(
+      (point) => (point["dataPointName"] ?? point["name"]) === session.name,
+    );
+    const sleep = object(source?.["sleep"]);
+    return Array.isArray(sleep["stages"]) ? sleep["stages"].map(object) : [];
+  });
+  const stagesAvailable = ordered.some((session) => {
+    const source = sleepPoints.find(
+      (point) => (point["dataPointName"] ?? point["name"]) === session.name,
+    );
+    return Array.isArray(object(source?.["sleep"])["stages"]);
+  });
+  const sleepStageMinutes = stagesAvailable
+    ? (stage: string): number | null => {
+        if (hasOverlap) return null;
+        let total = 0;
+        for (const segment of stageSegments) {
+          if (segment["type"] !== stage) continue;
+          const start = Date.parse(String(segment["startTime"] ?? ""));
+          const end = Date.parse(String(segment["endTime"] ?? ""));
+          if (!Number.isFinite(start) || !Number.isFinite(end) || end < start)
+            return null;
+          total += (end - start) / 60_000;
+        }
+        return Math.round(total);
+      }
+    : () => null;
+  const primarySleep =
+    ordered.find((session) => session.mainSleep) ??
+    (ordered.length === 1 ? ordered[0] : undefined);
+
   return {
     date: input.date,
     timeZone: input.timeZone,
     aggregation:
-      "Google Health daily rollups; sleep sessions reconciled by the API",
+      "Google Health source civil-date rollups; sleep sessions reconciled by the API. The account time zone is descriptive and does not override source civil times.",
     metrics: {
       steps: metric(steps, "steps"),
       distance: metric(distance === null ? null : distance / 1000, "m"),
@@ -218,17 +253,30 @@ export function buildDailySummary(input: DailySummaryInput): JsonRecord {
       totalCalories: metric(totalCalories, "kcal"),
       activeMinutes: metric(activeMinutes, "min"),
       averageHeartRate: metric(heartRate, "bpm"),
-      weight: metric(weight === null ? null : weight / 1000, "kg"),
+      averageWeight: metric(weight === null ? null : weight / 1000, "kg"),
       hydration: metric(hydration, "ml"),
       nutrition,
       sleepMinutesAsleep,
       sleepMinutesInBed,
+      sleepStagesMinutes: {
+        deep: sleepStageMinutes("DEEP"),
+        light: sleepStageMinutes("LIGHT"),
+        rem: sleepStageMinutes("REM"),
+        awake: sleepStageMinutes("AWAKE"),
+      },
+      primarySleep: primarySleep
+        ? {
+            startTime: primarySleep.startTime,
+            endTime: primarySleep.endTime,
+          }
+        : null,
     },
     sleepSessions: ordered,
     dataQuality: {
       rollupTypesReturned: ROLLUP_TYPES.filter(
         (type) => input.rollups[type] !== undefined,
       ),
+      unavailableMetrics: input.unavailableMetrics ?? [],
       sleepSessionCount: ordered.length,
       sleepDurationUnavailableReason: hasOverlap
         ? "Sleep sessions overlap, so adding their durations would double-count."
@@ -258,34 +306,37 @@ export function registerSummaryTool(server: McpServer, api: HealthApi): void {
           .string()
           .regex(/^\d{4}-\d{2}-\d{2}$/)
           .describe(
-            "Local calendar date in the Google Health account time zone.",
-          ),
-        timeZone: z
-          .string()
-          .min(1)
-          .max(100)
-          .optional()
-          .describe(
-            "Optional IANA time zone override; otherwise use Google Health account settings.",
+            "Civil calendar date used by Google Health source-data rollups. The account time zone is reported as context and cannot override the civil date stored with measurements.",
           ),
       }),
       outputSchema: toolOutputSchema,
     },
-    async ({ date, timeZone: requestedTimeZone }) => {
-      const settings = await api.request<JsonRecord>({
-        methodId: "health.users.getSettings",
-        pathParams: { name: "users/me/settings" },
-      });
-      const configuredTimeZone = object(settings["settings"])["timeZone"];
-      const timeZone =
-        requestedTimeZone ??
-        (typeof configuredTimeZone === "string" ? configuredTimeZone : "UTC");
+    async ({ date }) => {
+      dateParts(date);
+      const unavailableMetrics: { metric: string; reason: string }[] = [];
+      let timeZone: string | null = null;
       try {
-        new Intl.DateTimeFormat("en", { timeZone });
+        const settings = await api.request<JsonRecord>({
+          methodId: "health.users.getSettings",
+          pathParams: { name: "users/me/settings" },
+        });
+        const configuredTimeZone = settings["timeZone"];
+        if (typeof configuredTimeZone === "string") {
+          try {
+            new Intl.DateTimeFormat("en", { timeZone: configuredTimeZone });
+            timeZone = configuredTimeZone;
+          } catch {
+            unavailableMetrics.push({
+              metric: "accountTimeZone",
+              reason: "invalid_settings_value",
+            });
+          }
+        }
       } catch {
-        throw new TypeError(
-          "Google Health settings did not provide a valid IANA time zone; supply timeZone explicitly.",
-        );
+        unavailableMetrics.push({
+          metric: "accountTimeZone",
+          reason: "request_failed",
+        });
       }
 
       const { year, month, day } = dateParts(date);
@@ -301,53 +352,76 @@ export function registerSummaryTool(server: McpServer, api: HealthApi): void {
             if (!capability || !capability.operations.includes("dailyRollUp"))
               return [dataType, {}];
             assertOperationAllowed(dataType, "dailyRollUp");
-            const result = await api.request<JsonRecord>({
-              methodId: "health.users.dataTypes.dataPoints.dailyRollUp",
-              pathParams: { parent: `users/me/dataTypes/${dataType}` },
-              body: { range, windowSizeDays: 1 },
-            });
-            return [dataType, result];
+            try {
+              const result = await api.request<JsonRecord>({
+                methodId: "health.users.dataTypes.dataPoints.dailyRollUp",
+                pathParams: { parent: `users/me/dataTypes/${dataType}` },
+                body: { range, windowSizeDays: 1 },
+              });
+              return [dataType, result];
+            } catch {
+              unavailableMetrics.push({
+                metric: dataType,
+                reason: "request_failed",
+              });
+              return [dataType, {}];
+            }
           }),
         ),
       );
-      const sleepCapability = getCapability("sleep");
-      if (!sleepCapability?.operations.includes("reconcile"))
-        throw new TypeError(
-          "Google Health sleep reconciliation is unavailable.",
-        );
-      assertOperationAllowed("sleep", "reconcile");
-      const sleepFilter = `sleep.interval.civil_end_time >= "${date}" AND sleep.interval.civil_end_time < "${nextCivilDate(date)}"`;
       const sleepPoints: JsonRecord[] = [];
-      let pageToken: string | undefined;
-      for (let page = 0; page < 10; page += 1) {
-        const result = await api.request<JsonRecord>({
-          methodId: "health.users.dataTypes.dataPoints.reconcile",
-          pathParams: { parent: "users/me/dataTypes/sleep" },
-          query: {
-            filter: sleepFilter,
-            pageSize: 25,
-            ...(pageToken ? { pageToken } : {}),
-          },
+      const sleepCapability = getCapability("sleep");
+      if (!sleepCapability?.operations.includes("reconcile")) {
+        unavailableMetrics.push({
+          metric: "sleep",
+          reason: "unsupported_operation",
         });
-        const pagePoints = result["dataPoints"];
-        if (!Array.isArray(pagePoints))
-          throw new TypeError(
-            "Google Health sleep reconciliation response is missing dataPoints.",
-          );
-        sleepPoints.push(...pagePoints.map(object));
-        const nextPageToken = result["nextPageToken"];
-        pageToken =
-          typeof nextPageToken === "string" && nextPageToken
-            ? nextPageToken
-            : undefined;
-        if (!pageToken) break;
-        if (page === 9)
-          throw new TypeError(
-            "Sleep summary exceeded the 250-session pagination limit; use the sleep data tool for a bounded query.",
-          );
+      } else {
+        assertOperationAllowed("sleep", "reconcile");
+        const sleepFilter = `sleep.interval.civil_end_time >= "${date}" AND sleep.interval.civil_end_time < "${nextCivilDate(date)}"`;
+        let pageToken: string | undefined;
+        try {
+          for (let page = 0; page < 10; page += 1) {
+            const result = await api.request<JsonRecord>({
+              methodId: "health.users.dataTypes.dataPoints.reconcile",
+              pathParams: { parent: "users/me/dataTypes/sleep" },
+              query: {
+                filter: sleepFilter,
+                pageSize: 25,
+                ...(pageToken ? { pageToken } : {}),
+              },
+            });
+            const pagePoints = result["dataPoints"];
+            if (!Array.isArray(pagePoints))
+              throw new TypeError("Missing sleep session records.");
+            sleepPoints.push(...pagePoints.map(object));
+            const nextPageToken = result["nextPageToken"];
+            pageToken =
+              typeof nextPageToken === "string" && nextPageToken
+                ? nextPageToken
+                : undefined;
+            if (!pageToken) break;
+            if (page === 9)
+              throw new TypeError("Sleep session page limit reached.");
+          }
+        } catch {
+          sleepPoints.length = 0;
+          unavailableMetrics.push({
+            metric: "sleep",
+            reason: "request_failed_or_incomplete",
+          });
+        }
       }
       const sleep = { dataPoints: sleepPoints };
-      return toolResult(buildDailySummary({ date, timeZone, rollups, sleep }));
+      return toolResult(
+        buildDailySummary({
+          date,
+          timeZone,
+          rollups,
+          sleep,
+          unavailableMetrics,
+        }),
+      );
     },
   );
 }

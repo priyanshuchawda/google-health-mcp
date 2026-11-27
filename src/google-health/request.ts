@@ -11,18 +11,24 @@ export interface BuildUrlOptions {
 function escapePathValue(value: string, reserved: boolean): string {
   if (
     !value ||
-    /[?#]/.test(value) ||
+    /[?#%\\]/.test(value) ||
     Array.from(value).some((character) => character.charCodeAt(0) < 32)
   ) {
     throw new TypeError(
-      "Path parameters must be non-empty resource names without query or fragment characters.",
+      "Path parameters must be non-empty resource names without query, fragment, escape, or backslash characters.",
+    );
+  }
+  const segments = value.split("/");
+  if (
+    (!reserved && value.includes("/")) ||
+    segments.some((part) => !part || part === "." || part === "..")
+  ) {
+    throw new TypeError(
+      "Path parameters cannot contain unexpected separators, empty segments, or dot segments.",
     );
   }
   return reserved
-    ? value
-        .split("/")
-        .map((part) => encodeURIComponent(part))
-        .join("/")
+    ? segments.map((part) => encodeURIComponent(part)).join("/")
     : encodeURIComponent(value);
 }
 

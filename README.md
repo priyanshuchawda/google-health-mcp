@@ -13,20 +13,20 @@ The public source repository contains no credentials or user health records. A p
 
 The checked-in capability snapshot contains all **44 Google Health data type entries** in the official catalog and endpoint metadata generated from the official v4 and v4beta discovery documents. The generic data tool respects each type's allowed operations; a type is not writable just because another type is.
 
-| Tool                           | Purpose                                                                                             |
-| ------------------------------ | --------------------------------------------------------------------------------------------------- |
-| `get_daily_health_summary`     | Reconciled sleep plus Google's daily rollups for the requested local date and timezone              |
-| `get_health_data`              | List, fetch, reconcile, or aggregate a documented health data type with pagination and date filters |
-| `get_health_account_data`      | Read identity, profile, settings, paired devices, and IRN profile                                   |
-| `create_health_record`         | Create one supported record from user-supplied values                                               |
-| `update_health_record`         | Patch one supported, exact record                                                                   |
-| `delete_health_records`        | Delete exact record names after explicit confirmation in the tool input                             |
-| `update_health_account_data`   | Update supported profile or settings fields                                                         |
-| `export_exercise_tcx`          | Export a supported exercise route                                                                   |
-| `get_shared_health_link`       | Read a user-provided SMART Health Link                                                              |
-| `list_webhook_configuration`   | Optional project-level webhook reads (local opt-in only)                                            |
-| `write_webhook_configuration`  | Optional project-level webhook writes (local opt-in only)                                           |
-| `delete_webhook_configuration` | Optional project-level webhook deletion (local opt-in only)                                         |
+| Tool                           | Purpose                                                                                                |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `get_daily_health_summary`     | Google's source-civil-date rollups and reconciled sleep; account time zone is context, not an override |
+| `get_health_data`              | List, fetch, reconcile, or aggregate a documented health data type with pagination and date filters    |
+| `get_health_account_data`      | Read identity, profile, settings, paired devices, and IRN profile                                      |
+| `create_health_record`         | Create one supported record from user-supplied values                                                  |
+| `update_health_record`         | Patch one supported, exact record                                                                      |
+| `delete_health_records`        | Delete exact record names after explicit confirmation in the tool input                                |
+| `update_health_account_data`   | Update supported profile or settings fields                                                            |
+| `export_exercise_tcx`          | Export a supported exercise route                                                                      |
+| `get_shared_health_link`       | Read a user-provided SMART Health Link                                                                 |
+| `list_webhook_configuration`   | Optional project-level webhook reads (local opt-in only)                                               |
+| `write_webhook_configuration`  | Optional project-level webhook writes (local opt-in only)                                              |
+| `delete_webhook_configuration` | Optional project-level webhook deletion (local opt-in only)                                            |
 
 Daily summaries use Google's own rollups where available; raw overlapping sources are not blindly added. Missing data stays missing rather than being represented as zero. Sleep summaries distinguish session time and stages and include completeness information. Results preserve API units and dates.
 
@@ -143,7 +143,7 @@ The Worker is optional. It uses Cloudflare's maintained OAuth Provider for MCP a
    npx wrangler deploy
    ```
 
-Cloudflare KV is required for OAuth authorization state and token/grant records. Ordinary personal use targets Workers Free and KV Free limits, but actual free-tier eligibility, account quotas, Worker CPU use and Google OAuth eligibility depend on the account and must be checked in Cloudflare/Google dashboards. This repository does not deploy automatically. The present verification is a local dry run, not a live deployment or measured production CPU result.
+Cloudflare KV is required for OAuth authorization state and token/grant records. Worker observability is disabled in `wrangler.jsonc` because Cloudflare invocation logs include request URLs, which can carry OAuth callback codes. Ordinary personal use targets Workers Free and KV Free limits, but actual free-tier eligibility, account quotas, Worker CPU use and Google OAuth eligibility depend on the account and must be checked in Cloudflare/Google dashboards. This repository does not deploy automatically. The present verification is a local dry run, not a live deployment or measured production CPU result.
 
 For local Worker development, copy `.dev.vars.example` to `.dev.vars`; edit only the synthetic loopback resource and test email unless you are intentionally testing the complete OAuth callback. `.dev.vars` is ignored by Git.
 

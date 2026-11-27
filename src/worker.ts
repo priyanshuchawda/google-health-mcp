@@ -8,6 +8,11 @@ import {
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { CodeChallengeMethod, OAuth2Client } from "google-auth-library";
 import { allHealthScopes } from "./auth/scopes.js";
+import {
+  renderConsentMarkup,
+  selectedConsentScopes,
+  signScopes,
+} from "./auth/consent.js";
 import { createHealthMcpServer } from "./server.js";
 
 const MCP_READ = "mcp:read";
@@ -81,21 +86,6 @@ function workerBaseUrl(request: Request): string {
   return new URL(request.url).origin;
 }
 
-function consentMarkup(
-  name: string,
-  redirectHost: string,
-  requested: readonly string[],
-  handle: string,
-): string {
-  const scopeItems = requested
-    .map(
-      (scope) =>
-        `<li><label><input type="checkbox" name="scope" value="${escapeHtml(scope)}" checked> ${escapeHtml(scope === MCP_READ ? "Read health data" : "Write supported health records")}</label></li>`,
-    )
-    .join("");
-  return `<p><strong>${escapeHtml(name)}</strong> is requesting access. Its OAuth redirect returns to <code>${escapeHtml(redirectHost)}</code>.</p><section aria-label="Google Health data disclosure"><h2>How Google Health data will be used</h2><p>This personal server requests access to the Google Health data categories listed on Google's next consent screen so it can answer your health and fitness requests. When you invoke a tool, the server sends only that request's result to this MCP client for your requested analysis. The server does not keep a copy of health records. If this client is ChatGPT or another AI service, its service receives the returned health data under its own terms. Data is not used for advertising, sold, or used to train a general-purpose AI model.</p><p>Read the <a href="https://developers.google.com/health/policies/health-api-developer-user-data-policy" rel="noreferrer">Google Health data policy</a> and this deployment's privacy information before continuing. You can deny access here or revoke Google and MCP authorization later.</p></section><ul>${scopeItems}</ul><form method="post" action="/authorize"><input type="hidden" name="handle" value="${escapeHtml(handle)}"><button name="decision" value="approve">Continue to Google sign-in</button> <button name="decision" value="deny">Deny</button></form>`;
-}
-
 async function startGoogleAuthorization(
   request: Request,
   env: Env,
@@ -150,10 +140,15 @@ async function handleAuthorize(request: Request, env: Env): Promise<Response> {
         );
       const details = await oauth.describeConsent(parsed);
       const consent = await oauth.beginConsent(parsed);
+      const signature = await signScopes(
+        env.GOOGLE_CLIENT_SECRET,
+        consent.handle,
+        requested,
+      );
       consent.headers.set("content-type", "text/html; charset=utf-8");
       consent.headers.set("cache-control", "no-store");
       return new Response(
-        `<!doctype html><meta charset="utf-8"><title>Health MCP authorization</title><h1>Health MCP authorization</h1>${consentMarkup(details.clientName, details.redirectHost, requested, consent.handle)}`,
+        `<!doctype html><meta charset="utf-8"><title>Health MCP authorization</title><h1>Health MCP authorization</h1>${renderConsentMarkup(details.clientName, details.redirectHost, requested, consent.handle, signature)}`,
         { headers: consent.headers },
       );
     } catch (error) {
@@ -177,13 +172,20 @@ async function handleAuthorize(request: Request, env: Env): Promise<Response> {
         const denied = await oauth.denyConsent(request, handle);
         return new Response(null, { status: 302, headers: denied.headers });
       }
-      const requestedScopes = form.getAll("scope").map(String);
-      if (!requestedScopes.includes(MCP_READ))
+      let requestedScopes: string[];
+      try {
+        requestedScopes = await selectedConsentScopes(
+          form,
+          env.GOOGLE_CLIENT_SECRET,
+          handle,
+        );
+      } catch {
         return htmlPage(
           "Read access is required",
           "<p>Allow read access to continue.</p>",
           400,
         );
+      }
       const approved = await oauth.approveConsent(request, handle, {
         scope: requestedScopes.filter((scope) =>
           [MCP_READ, MCP_WRITE].includes(scope),
