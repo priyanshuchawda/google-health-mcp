@@ -1,0 +1,293 @@
+import {
+  getApiMethod,
+  requiredScopesFor,
+  type ApiMethod,
+  type HealthOperation,
+} from "./capabilities.js";
+import { validateGoogleRequestBody } from "./body-validation.js";
+import { HealthApiError, PaginationLimitError } from "./errors.js";
+import { buildHealthUrl, isWriteMethod } from "./request.js";
+
+export interface HealthTokenProvider {
+  getAccessToken(scopes: readonly string[]): Promise<string>;
+}
+
+export interface HealthRequest {
+  methodId: string;
+  apiVersion?: "v4" | "v4beta";
+  pathParams?: Readonly<Record<string, string>>;
+  query?: Readonly<Record<string, string | number | boolean>>;
+  body?: unknown;
+  responseType?: "json" | "text";
+}
+
+export interface HealthApiOptions {
+  tokenProvider: HealthTokenProvider;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+  maxResponseBytes?: number;
+}
+
+export interface ListAllOptions extends HealthRequest {
+  collectionKey?: string;
+  maxPages?: number;
+}
+
+const SPECIAL_METHOD_SCOPES: Readonly<Record<string, readonly string[]>> = {
+  "health.users.getIdentity": [
+    "https://www.googleapis.com/auth/googlehealth.profile.readonly",
+  ],
+  "health.users.getIrnProfile": [
+    "https://www.googleapis.com/auth/googlehealth.irn.readonly",
+  ],
+  "health.users.getProfile": [
+    "https://www.googleapis.com/auth/googlehealth.profile.readonly",
+  ],
+  "health.users.updateProfile": [
+    "https://www.googleapis.com/auth/googlehealth.profile.writeonly",
+  ],
+  "health.users.getSettings": [
+    "https://www.googleapis.com/auth/googlehealth.settings.readonly",
+  ],
+  "health.users.updateSettings": [
+    "https://www.googleapis.com/auth/googlehealth.settings.writeonly",
+  ],
+  "health.users.pairedDevices.get": [
+    "https://www.googleapis.com/auth/googlehealth.profile.readonly",
+  ],
+  "health.users.pairedDevices.list": [
+    "https://www.googleapis.com/auth/googlehealth.profile.readonly",
+  ],
+  "health.shl.m.getShlManifest": [
+    "https://www.googleapis.com/auth/googlehealth.profile.readonly",
+  ],
+  "health.shl.r.get": [
+    "https://www.googleapis.com/auth/googlehealth.profile.readonly",
+  ],
+};
+const PROJECT_IAM_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
+
+function operationFor(methodId: string): HealthOperation | undefined {
+  const operation = methodId.split(".").at(-1);
+  if (
+    operation === "list" ||
+    operation === "get" ||
+    operation === "reconcile" ||
+    operation === "rollUp" ||
+    operation === "dailyRollUp"
+  )
+    return operation;
+  if (
+    operation === "create" ||
+    operation === "patch" ||
+    operation === "batchDelete"
+  )
+    return operation;
+  if (operation === "exportExerciseTcx") return "get";
+  return undefined;
+}
+
+function scopesForMethod(
+  methodId: string,
+  pathParams: Readonly<Record<string, string>>,
+): readonly string[] {
+  if (methodId.startsWith("health.projects.subscribers."))
+    return [PROJECT_IAM_SCOPE];
+  const special = SPECIAL_METHOD_SCOPES[methodId];
+  if (special) return special;
+  if (methodId.endsWith(".exportExerciseTcx")) {
+    return [
+      "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly",
+      "https://www.googleapis.com/auth/googlehealth.location.readonly",
+    ];
+  }
+
+  const resourceName = pathParams["parent"] ?? pathParams["name"];
+  const dataType = resourceName?.match(/(?:^|\/)dataTypes\/([^/]+)/)?.[1];
+  const operation = operationFor(methodId);
+  if (dataType && operation) return requiredScopesFor(dataType, operation);
+  throw new TypeError(
+    `No Google Health scope mapping is configured for ${methodId}.`,
+  );
+}
+
+function methodIsWrite(method: ApiMethod): boolean {
+  return isWriteMethod(method);
+}
+
+export class HealthApi {
+  private readonly tokenProvider: HealthTokenProvider;
+  private readonly fetchImpl: typeof fetch;
+  private readonly timeoutMs: number;
+  private readonly maxResponseBytes: number;
+
+  constructor(options: HealthApiOptions) {
+    this.tokenProvider = options.tokenProvider;
+    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.timeoutMs = options.timeoutMs ?? 15_000;
+    this.maxResponseBytes = options.maxResponseBytes ?? 2 * 1024 * 1024;
+  }
+
+  async request<T = unknown>(request: HealthRequest): Promise<T> {
+    const apiVersion = request.apiVersion ?? "v4";
+    const method = getApiMethod(request.methodId, apiVersion);
+    const pathParams = request.pathParams ?? {};
+    const url = buildHealthUrl(request.methodId, {
+      apiVersion,
+      pathParams,
+      ...(request.query ? { query: request.query } : {}),
+    });
+    const hasBody = request.body !== undefined;
+    if (hasBody && !method.requestSchema)
+      throw new TypeError(
+        `${request.methodId} does not accept a request body.`,
+      );
+    if (method.httpMethod === "GET" && hasBody)
+      throw new TypeError(`${request.methodId} cannot use a request body.`);
+    if (hasBody)
+      validateGoogleRequestBody(
+        request.methodId,
+        apiVersion,
+        pathParams,
+        request.body,
+      );
+
+    const scopes = scopesForMethod(request.methodId, pathParams);
+    const accessToken = await this.tokenProvider.getAccessToken(scopes);
+    const headers = new Headers({
+      accept:
+        request.responseType === "text"
+          ? "application/xml, text/xml, */*"
+          : "application/json",
+      authorization: `Bearer ${accessToken}`,
+    });
+    if (hasBody) headers.set("content-type", "application/json");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, {
+        method: method.httpMethod,
+        headers,
+        ...(hasBody ? { body: JSON.stringify(request.body) } : {}),
+        signal: controller.signal,
+        redirect: "error",
+      });
+    } catch {
+      throw new HealthApiError({
+        methodId: request.methodId,
+        outcome: methodIsWrite(method) ? "uncertain" : "rejected",
+        message: methodIsWrite(method)
+          ? "Google Health write outcome is uncertain because the network request failed; inspect the record before retrying."
+          : "Google Health request failed before a response was received.",
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (!response.ok) {
+      const uncertain = methodIsWrite(method) && response.status >= 500;
+      throw new HealthApiError({
+        methodId: request.methodId,
+        status: response.status,
+        outcome: uncertain ? "uncertain" : "rejected",
+        message: uncertain
+          ? `Google Health returned HTTP ${response.status} after a write request; verify the record before retrying.`
+          : `Google Health rejected ${request.methodId} with HTTP ${response.status}.`,
+      });
+    }
+
+    if (response.status === 204) return undefined as T;
+    try {
+      const responseText = await readResponseText(
+        response,
+        this.maxResponseBytes,
+      );
+      if (request.responseType === "text") return responseText as T;
+      return JSON.parse(responseText) as T;
+    } catch {
+      throw new HealthApiError({
+        methodId: request.methodId,
+        status: response.status,
+        outcome: methodIsWrite(method) ? "uncertain" : "rejected",
+        message: methodIsWrite(method)
+          ? "Google Health accepted the write but returned an unreadable response; verify the record before retrying."
+          : "Google Health returned an unreadable response.",
+      });
+    }
+  }
+
+  async listAll<T = unknown>(options: ListAllOptions): Promise<T[]> {
+    const method = getApiMethod(options.methodId, options.apiVersion ?? "v4");
+    if (method.httpMethod !== "GET" || !options.methodId.endsWith(".list")) {
+      throw new TypeError(
+        "Pagination requires an official Google Health list method.",
+      );
+    }
+    const maxPages = options.maxPages ?? 20;
+    if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 100) {
+      throw new TypeError("maxPages must be an integer from 1 through 100.");
+    }
+    const collectionKey = options.collectionKey ?? "dataPoints";
+    const items: T[] = [];
+    let pageToken: string | undefined;
+    let pages = 0;
+
+    do {
+      const result = await this.request<Record<string, unknown>>({
+        methodId: options.methodId,
+        ...(options.apiVersion ? { apiVersion: options.apiVersion } : {}),
+        ...(options.pathParams ? { pathParams: options.pathParams } : {}),
+        query: { ...options.query, ...(pageToken ? { pageToken } : {}) },
+      });
+      const pageItems = result[collectionKey];
+      if (!Array.isArray(pageItems))
+        throw new TypeError(
+          `Google Health list response is missing the ${collectionKey} array.`,
+        );
+      items.push(...(pageItems as T[]));
+      const nextPageToken = result["nextPageToken"];
+      pageToken =
+        typeof nextPageToken === "string" && nextPageToken
+          ? nextPageToken
+          : undefined;
+      pages += 1;
+      if (pageToken && pages >= maxPages)
+        throw new PaginationLimitError(pageToken);
+    } while (pageToken);
+
+    return items;
+  }
+}
+
+async function readResponseText(
+  response: Response,
+  maxBytes: number,
+): Promise<string> {
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    await response.body?.cancel();
+    throw new TypeError(
+      `Google Health response exceeded the ${maxBytes}-byte safety limit.`,
+    );
+  }
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > maxBytes) {
+      await reader.cancel();
+      throw new TypeError(
+        `Google Health response exceeded the ${maxBytes}-byte safety limit.`,
+      );
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}

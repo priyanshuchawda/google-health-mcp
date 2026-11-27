@@ -1,0 +1,11 @@
+{
+  "name": "google-health-mcp",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-27",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "kv_namespaces": [
+    { "binding": "OAUTH_KV", "id": "replace-after-creating-free-kv-namespace" },
+  ],
+}
