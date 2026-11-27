@@ -104,6 +104,8 @@ The Worker is optional. It uses Cloudflare's maintained OAuth Provider for MCP a
    npx wrangler whoami
    ```
 
+   Before the first deploy, register a `workers.dev` account subdomain in **Cloudflare Dashboard → Workers & Pages → Your subdomain** if the account does not already have one. Wrangler may not be able to claim `google-health-mcp` automatically if that account-level name is unavailable. Pick an available account subdomain; the final Worker URL will be `https://google-health-mcp.<account-subdomain>.workers.dev`.
+
 2. Create the OAuth KV namespace and copy its ID into `wrangler.jsonc` under `kv_namespaces`:
 
    ```powershell
