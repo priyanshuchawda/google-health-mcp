@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createInterface } from "node:readline/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -37,6 +38,59 @@ function openBrowser(url: string): void {
   });
   child.on("error", () => undefined);
   child.unref();
+}
+
+async function confirmLocalDataAccess(
+  scopes: readonly string[],
+): Promise<boolean> {
+  const categoryLabels: Record<string, string> = {
+    activity_and_fitness: "activity, steps, distance, calories and exercise",
+    ecg: "electrocardiogram records",
+    health_metrics_and_measurements:
+      "heart rate, oxygen saturation and other body measurements",
+    irn: "irregular rhythm notifications",
+    location: "exercise route location",
+    logged_symptoms: "logged symptoms",
+    mindfulness: "mindfulness records",
+    nutrition: "nutrition and hydration",
+    profile: "account profile and paired devices",
+    reproductive_health: "reproductive health",
+    settings: "health account settings",
+    sleep: "sleep sessions and stages",
+  };
+  const categories = [
+    ...new Set(
+      scopes.map((scope) => {
+        const category = scope.split("googlehealth.")[1]?.split(".")[0];
+        return (
+          categoryLabels[category ?? ""] ?? category ?? "Google Health data"
+        );
+      }),
+    ),
+  ];
+  process.stdout.write(
+    [
+      "Google Health data access disclosure",
+      `This local server requests these Google Health data categories: ${categories.join("; ")}. Google's next consent screen lists the exact scopes.`,
+      "When an MCP tool is called, requested health data is read from Google and returned to the connected MCP client (which may be an AI assistant and may process the data under its own terms).",
+      "The server does not retain health response records; OAuth credentials are saved in a private file outside this project.",
+      `Requested Google OAuth scopes: ${scopes.length}${scopes.some((scope) => scope.endsWith(".writeonly")) ? ", including supported write permissions" : ", read-only"}.`,
+      "Google Health data will be used only for user-directed health and fitness features and handled under Google's Limited Use requirements.",
+      "",
+    ].join("\n") + "\n",
+  );
+  const prompt = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  try {
+    const answer = await prompt.question(
+      "Type AUTHORIZE to continue to Google sign-in: ",
+    );
+    return answer.trim() === "AUTHORIZE";
+  } finally {
+    prompt.close();
+  }
 }
 
 function printHelp(): void {
@@ -82,6 +136,7 @@ export async function runCli(args = process.argv.slice(2)): Promise<void> {
       includeWrites: hasFlag(options, "--write"),
       includeProjectAdmin: hasFlag(options, "--project-admin"),
       openBrowser,
+      confirmAccess: confirmLocalDataAccess,
     });
     process.stdout.write(
       `Google Health authorization saved locally at ${path}. Token values were not printed.\n`,

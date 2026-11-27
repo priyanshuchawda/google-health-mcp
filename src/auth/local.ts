@@ -100,6 +100,7 @@ export interface LocalAuthOptions {
   timeoutMs?: number;
   oauthClientFactory?: OAuthClientFactory;
   openBrowser?: (url: string) => void;
+  confirmAccess?: (scopes: readonly string[]) => Promise<boolean>;
 }
 
 /** Runs Google authorization on a loopback-only callback with PKCE and state validation. */
@@ -181,6 +182,11 @@ export async function runLocalAuthorization(
       code_challenge: codeChallenge,
       code_challenge_method: CodeChallengeMethod.S256,
     });
+    if (options.confirmAccess && !(await options.confirmAccess(scopes))) {
+      throw new Error(
+        "Google Health authorization was cancelled before browser sign-in.",
+      );
+    }
     console.log(
       `Open this URL to authorize Google Health: ${authorizationUrl}`,
     );

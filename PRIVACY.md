@@ -12,7 +12,7 @@ The application stores OAuth credentials needed for continued access. In local m
 
 When a user invokes a tool, the specific returned data is sent to the MCP client. A client such as ChatGPT may process that data under its own product terms and privacy settings. The user must choose whether to connect the MCP server and invoke health tools. The server does not send health records to analytics, advertising, data-broker, or general-purpose model-training services.
 
-The remote consent page discloses this data flow before the user proceeds to Google's OAuth consent. The account owner should preserve that disclosure and make deployment-specific privacy information available to authorized users.
+The remote consent page discloses this data flow before the user proceeds to Google's OAuth consent. Local setup displays the same data flow in the terminal and requires the user to type `AUTHORIZE` before opening Google sign-in. The account owner should preserve that disclosure and make deployment-specific privacy information available to authorized users.
 
 ## Retention and deletion
 

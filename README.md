@@ -60,6 +60,8 @@ Read the [architecture notes](docs/architecture.md) for the local/remote authori
    npm run auth -- --client-secrets C:\path\to\client_secret.json
    ```
 
+   Before opening Google sign-in, the terminal displays how data flows and asks you to type `AUTHORIZE`. The Google consent screen then shows the requested scopes.
+
    Add `--write` only if you want the local MCP server to write supported record types. Add `--project-admin` only if you intentionally want the opt-in project webhook tools. These two switches request additional Google permissions.
 
 5. Check the saved authorization by running:

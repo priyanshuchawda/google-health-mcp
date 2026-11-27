@@ -6,6 +6,7 @@ import {
   allHealthScopes,
   createLocalTokenProvider,
   loadLocalCredentials,
+  runLocalAuthorization,
   type GoogleOAuthClient,
 } from "../../src/auth/local.js";
 
@@ -36,6 +37,45 @@ async function fixture(scopes: string[]): Promise<string> {
 }
 
 describe("local Google OAuth credentials", () => {
+  it("requires explicit data-sharing consent before opening Google's OAuth page", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ghmcp-auth-consent-"));
+    directories.push(dir);
+    const clientSecretsPath = join(dir, "client_secret.json");
+    await writeFile(
+      clientSecretsPath,
+      JSON.stringify({
+        installed: {
+          client_id: "synthetic-client-id",
+          client_secret: "synthetic-client-secret",
+        },
+      }),
+    );
+    const oauth = {
+      generateCodeVerifierAsync: vi.fn(async () => ({
+        codeVerifier: "synthetic-verifier",
+        codeChallenge: "synthetic-challenge",
+      })),
+      generateAuthUrl: vi.fn(() => "https://accounts.google.com/synthetic"),
+      getToken: vi.fn(),
+      setCredentials: vi.fn(),
+      getAccessToken: vi.fn(),
+    } as unknown as GoogleOAuthClient;
+    const openBrowser = vi.fn();
+    const confirmAccess = vi.fn(async () => false);
+
+    await expect(
+      runLocalAuthorization({
+        clientSecretsPath,
+        oauthClientFactory: () => oauth,
+        openBrowser,
+        confirmAccess,
+      }),
+    ).rejects.toThrow(/cancelled before browser sign-in/i);
+    expect(confirmAccess).toHaveBeenCalledOnce();
+    expect(openBrowser).not.toHaveBeenCalled();
+    expect(oauth.getToken).not.toHaveBeenCalled();
+  });
+
   it("requests read scopes by default and adds only documented writable scopes on request", () => {
     const read = allHealthScopes();
     const readWrite = allHealthScopes(true);
