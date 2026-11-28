@@ -14,7 +14,9 @@ import {
 import {
   DashboardSubmissionGate,
   LatestRequest,
+  changedNumericFields,
   latestRangeForRefresh,
+  writeFeedback,
   type DateRange,
 } from "./dashboard-state.js";
 
@@ -136,6 +138,7 @@ function goalProgressView(): string {
     ? (summary["daily"] as HealthData[])
     : [];
   const latest = daily.at(-1);
+  const latestDate = String(latest?.["date"] ?? "selected date");
   const metrics = object(latest?.["metrics"]);
   const targets = object(preferences);
   const days = Number(object(summary?.["dateRange"])["days"] ?? daily.length);
@@ -146,7 +149,7 @@ function goalProgressView(): string {
       title: "Steps",
       value: valueOf(metrics["steps"]),
       target: Number(targets["dailyStepsGoal"] ?? 8_000),
-      unit: "steps today",
+      unit: `steps on ${latestDate}`,
     },
     {
       title: "Sleep",
@@ -155,13 +158,13 @@ function goalProgressView(): string {
           ? Number(valueOf(metrics["sleepMinutesAsleep"])) / 60
           : null,
       target: Number(targets["sleepHoursGoal"] ?? 8),
-      unit: "hours last source day",
+      unit: `hours on ${latestDate}`,
     },
     {
       title: "Hydration",
       value: valueOf(metrics["hydration"]),
       target: Number(targets["hydrationMlGoal"] ?? 2_500),
-      unit: "ml last source day",
+      unit: `ml on ${latestDate}`,
     },
     {
       title: "Exercise",
@@ -325,7 +328,18 @@ function logView(): string {
 
 function goalsView(): string {
   const values = object(preferences);
-  return `<article class="card"><h2>Your private dashboard preferences</h2><p class="muted">These optional targets are stored in your server's existing account-isolated KV. They are not Google Health's native goals.</p><form id="goals-form"><label>Daily steps<input name="dailyStepsGoal" type="number" min="0" max="200000" value="${escapeHtml(values["dailyStepsGoal"] ?? 8000)}" /></label><label>Sleep target (hours)<input name="sleepHoursGoal" type="number" min="0" max="24" step="0.25" value="${escapeHtml(values["sleepHoursGoal"] ?? 8)}" /></label><label>Water (ml/day)<input name="hydrationMlGoal" type="number" min="0" max="100000" value="${escapeHtml(values["hydrationMlGoal"] ?? 2500)}" /></label><label>Exercise (minutes/week)<input name="weeklyExerciseMinutesGoal" type="number" min="0" max="10080" value="${escapeHtml(values["weeklyExerciseMinutesGoal"] ?? 150)}" /></label><button type="submit">Save preferences</button></form></article>`;
+  const input = (
+    name: string,
+    label: string,
+    min: number,
+    max: number,
+    fallback: number,
+    step = "1",
+  ) => {
+    const value = Number(values[name] ?? fallback);
+    return `<label>${label}<input name="${name}" type="number" min="${min}" max="${max}" step="${step}" value="${escapeHtml(value)}" data-initial-value="${escapeHtml(value)}" /></label>`;
+  };
+  return `<article class="card"><h2>Your private dashboard preferences</h2><p class="muted">These optional targets are stored in your server's existing account-isolated KV. They are not Google Health's native goals.</p><form id="goals-form">${input("dailyStepsGoal", "Daily steps", 0, 200000, 8000)}${input("sleepHoursGoal", "Sleep target (hours)", 0, 24, 8, "0.25")}${input("hydrationMlGoal", "Water (ml/day)", 0, 100000, 2500)}${input("weeklyExerciseMinutesGoal", "Exercise (minutes/week)", 0, 10080, 150)}<button type="submit">Save changed preferences</button></form></article>`;
 }
 
 function render(): void {
@@ -427,9 +441,10 @@ async function submitWrite(
   form.setAttribute("aria-busy", "true");
   setStatus(pendingMessage);
   try {
-    await operation();
-    setStatus(successMessage);
-    void refresh({ quiet: true });
+    const result = await operation();
+    const feedback = writeFeedback(object(result), successMessage);
+    setStatus(feedback.message, feedback.outcome !== "completed");
+    if (feedback.outcome === "completed") void refresh({ quiet: true });
   } catch (error) {
     const detail =
       error instanceof Error ? ` ${error.message}` : " The request failed.";
@@ -459,8 +474,16 @@ async function submitPreferences(
   buttons.forEach((button) => (button.disabled = true));
   setStatus("Saving private dashboard targets…");
   try {
+    if (Object.keys(values).length === 0) {
+      setStatus("No preference changes to save.");
+      return;
+    }
     const result = await callTool("settings.update", { set: values });
-    preferences = object(result["settings"] ?? result);
+    preferences = {
+      ...object(preferences),
+      ...object(result["settings"] ?? result),
+      ...values,
+    };
     setStatus("Preferences saved.");
     render();
   } catch (error) {
@@ -661,17 +684,11 @@ function bindForms(): void {
     .querySelector<HTMLFormElement>("#goals-form")
     ?.addEventListener("submit", (event) => {
       event.preventDefault();
-      const values = new FormData(event.currentTarget as HTMLFormElement);
-      const parsed = Object.fromEntries(
-        [
-          "dailyStepsGoal",
-          "sleepHoursGoal",
-          "hydrationMlGoal",
-          "weeklyExerciseMinutesGoal",
-        ].map((key) => [key, Number(values.get(key))]),
-      );
       const form = event.currentTarget as HTMLFormElement;
-      void submitPreferences(form, parsed as Record<string, number>);
+      void submitPreferences(
+        form,
+        changedNumericFields(form) as Record<string, number>,
+      );
     });
 }
 
@@ -695,9 +712,27 @@ void app.connect().then(async () => {
       name: "settings.read",
       arguments: {},
     });
-    if (!result.isError) preferences = unwrap(result as unknown as HealthData);
+    if (!result.isError) {
+      preferences = unwrap(result as unknown as HealthData);
+      if (summary) render();
+    }
   } catch {
     /* The dashboard remains useful when host settings are unavailable. */
   }
-  if (!summary) await refresh();
+  if (!summary) {
+    await refresh();
+  } else {
+    try {
+      const result = await callTool("get_data_freshness", {
+        dataTypes: ["steps", "sleep", "heart-rate", "exercise"],
+        lookbackDays: 7,
+      });
+      freshness = Array.isArray(result["dataTypes"])
+        ? (result["dataTypes"] as HealthData[])
+        : [];
+    } catch {
+      freshnessUnavailable = true;
+    }
+    render();
+  }
 });

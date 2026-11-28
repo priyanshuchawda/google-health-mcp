@@ -166,6 +166,80 @@ describe("Google Health data freshness tool", () => {
     expect(filter).toContain(`civil_start_time < "${nextDay(today)}T00:00:00"`);
     expect(request).toHaveBeenCalledTimes(2);
   });
+
+  it("queries sleep with bounded physical RFC 3339 session timestamps", async () => {
+    const requests: {
+      methodId: string;
+      apiVersion?: string;
+      query?: { filter?: string };
+    }[] = [];
+    const request = vi.fn(async (input: (typeof requests)[number]) => {
+      requests.push(input);
+      if (input.methodId === "health.users.getSettings")
+        return { timeZone: "Asia/Kolkata" };
+      return {
+        dataPoints: [
+          {
+            sleep: {
+              interval: {
+                startTime: "2026-11-27T21:37:00Z",
+                endTime: "2026-11-28T04:00:00Z",
+              },
+            },
+          },
+        ],
+      };
+    });
+    const handler = captureFreshness({ request });
+    const response = (await handler({
+      dataTypes: ["sleep"],
+      lookbackDays: 7,
+    } as never)) as {
+      structuredContent: { data: { dataTypes: Record<string, unknown>[] } };
+    };
+    expect(response.structuredContent.data.dataTypes[0]).toMatchObject({
+      dataType: "sleep",
+      status: "record_found",
+      measurementTime: "2026-11-28T04:00:00Z",
+    });
+    expect(requests[0]?.query?.filter).toMatch(
+      /^sleep\.interval\.end_time >= "\d{4}-\d{2}-\d{2}T.*Z" AND sleep\.interval\.end_time < "\d{4}-\d{2}-\d{2}T.*Z"$/,
+    );
+    expect(requests[0]?.apiVersion).toBe("v4");
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  it("bounds ECG freshness by physical time and automatically selects beta for beta-only types", async () => {
+    const requests: {
+      methodId: string;
+      apiVersion?: string;
+      query?: { filter?: string };
+    }[] = [];
+    const request = vi.fn(async (input: (typeof requests)[number]) => {
+      requests.push(input);
+      return input.methodId === "health.users.getSettings"
+        ? { timeZone: "Asia/Kolkata" }
+        : {};
+    });
+    const handler = captureFreshness({ request });
+    await handler({
+      dataTypes: ["electrocardiogram", "skin-temperature-sensors"],
+      lookbackDays: 7,
+    } as never);
+    const ecg = requests.find((item) =>
+      item.query?.filter?.startsWith("electrocardiogram.interval.start_time"),
+    );
+    const beta = requests.find((item) =>
+      item.query?.filter?.startsWith(
+        "skin_temperature_sensors.sample_time.physical_time",
+      ),
+    );
+    expect(ecg?.query?.filter).toContain(
+      " AND electrocardiogram.interval.start_time < ",
+    );
+    expect(ecg?.apiVersion).toBe("v4");
+    expect(beta?.apiVersion).toBe("v4beta");
+  });
 });
 
 function nextDay(value: string): string {

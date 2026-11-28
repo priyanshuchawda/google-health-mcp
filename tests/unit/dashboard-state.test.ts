@@ -3,6 +3,7 @@ import {
   DashboardSubmissionGate,
   LatestRequest,
   latestRangeForRefresh,
+  writeFeedback,
 } from "../../src/ui/dashboard-state.js";
 
 describe("dashboard state", () => {
@@ -48,5 +49,23 @@ describe("dashboard state", () => {
     const newRefresh = requests.begin();
     expect(requests.isCurrent(oldRefresh)).toBe(false);
     expect(requests.isCurrent(newRefresh)).toBe(true);
+  });
+
+  it("treats only completed upstream operations as successful writes", () => {
+    expect(writeFeedback({ status: "completed" }, "Saved.")).toEqual({
+      outcome: "completed",
+      message: "Saved.",
+    });
+    expect(writeFeedback({ status: "pending" }, "Saved.")).toMatchObject({
+      outcome: "pending",
+      message: expect.stringContaining("still pending"),
+    });
+    expect(
+      writeFeedback({ status: "response_received_unconfirmed" }, "Saved."),
+    ).toMatchObject({
+      outcome: "unconfirmed",
+      message: expect.stringContaining("without confirming completion"),
+    });
+    expect(writeFeedback({}, "Saved.").outcome).toBe("unconfirmed");
   });
 });

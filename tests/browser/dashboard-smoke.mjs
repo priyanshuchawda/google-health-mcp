@@ -84,7 +84,10 @@ const hostShim = `
     window.__toolCalls.push({ name, args: message.params.arguments ?? {} });
     if (name === "create_health_record") {
       await new Promise((resolve) => setTimeout(resolve, 300));
-      respond({ content: [{ type: "text", text: "synthetic write rejection" }], isError: true });
+      respond({
+        content: [{ type: "text", text: "synthetic uncertain write" }],
+        isError: true,
+      });
     } else if (name === "get_health_summary") {
       respond({ content: [{ type: "text", text: "synthetic summary" }], structuredContent: { data: ${JSON.stringify(fixture)} } });
     } else if (name === "get_data_freshness") {
@@ -140,6 +143,8 @@ try {
     .getByRole("heading", { name: "Personal target progress" })
     .waitFor();
   assert.match(await page.locator("#view").innerText(), /1,200 \/ 8,000/);
+  assert.match(await page.locator("#view").innerText(), /steps on 2026-11-28/);
+  assert.doesNotMatch(await page.locator("#view").innerText(), /steps today/);
   assert.equal(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -170,10 +175,10 @@ try {
       window.__toolCalls.filter((call) => call.name === "create_health_record")
         .length === 1,
   );
-  await page.waitForFunction(() =>
-    document
-      .querySelector("#status")
-      ?.textContent?.startsWith("The result could not be confirmed."),
+  await page.waitForTimeout(500);
+  assert.match(
+    await page.locator("#status").innerText(),
+    /Check Google Health before retrying/,
   );
   assert.equal(
     await page.evaluate(
@@ -185,9 +190,19 @@ try {
     1,
     "double submit should issue exactly one write",
   );
+  await page.getByRole("button", { name: "Goals", exact: true }).click();
+  await page.locator('#goals-form input[name="hydrationMlGoal"]').fill("3000");
+  await page.locator("#goals-form").evaluate((form) => form.requestSubmit());
+  await page.waitForFunction(() =>
+    window.__toolCalls.some((call) => call.name === "settings.update"),
+  );
+  const preferenceUpdate = await page.evaluate(() =>
+    window.__toolCalls.find((call) => call.name === "settings.update"),
+  );
+  assert.deepEqual(preferenceUpdate.args.set, { hydrationMlGoal: 3000 });
   assert.deepEqual(pageErrors, []);
   console.log(
-    "Dashboard browser smoke passed: mobile layout, goals, sleep and workout views, duplicate-submit lock, and uncertain-write warning.",
+    "Dashboard browser smoke passed: mobile layout, historical labels, sleep/workout views, duplicate-submit lock, uncertain-write warning, and partial goal updates.",
   );
 } finally {
   await browser?.close();

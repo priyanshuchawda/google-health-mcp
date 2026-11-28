@@ -3,6 +3,40 @@ export interface DateRange {
   endDate: string;
 }
 
+export type WriteOutcome = "completed" | "pending" | "unconfirmed";
+
+export function writeFeedback(
+  result: Record<string, unknown>,
+  successMessage: string,
+): { outcome: WriteOutcome; message: string } {
+  if (result["status"] === "completed")
+    return { outcome: "completed", message: successMessage };
+  if (result["status"] === "pending")
+    return {
+      outcome: "pending",
+      message:
+        "Google Health accepted the write, but it is still pending. Check its operation status before treating it as saved or retrying.",
+    };
+  return {
+    outcome: "unconfirmed",
+    message:
+      "Google Health returned a response without confirming completion. Check Google Health before retrying to avoid a duplicate.",
+  };
+}
+
+export function changedNumericFields(
+  form: HTMLFormElement,
+): Record<string, number> {
+  const changed: Record<string, number> = {};
+  for (const input of form.querySelectorAll<HTMLInputElement>("input[name]")) {
+    const initial = Number(input.dataset["initialValue"]);
+    const current = Number(input.value);
+    if (Number.isFinite(current) && current !== initial)
+      changed[input.name] = current;
+  }
+  return changed;
+}
+
 function dateInTimeZone(date: Date, timeZone: string): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,

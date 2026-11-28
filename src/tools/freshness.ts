@@ -1,6 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { getCapability } from "../google-health/capabilities.js";
+import {
+  defaultApiVersionForDataType,
+  getCapability,
+} from "../google-health/capabilities.js";
 import type { HealthApi } from "../google-health/client.js";
 import { toolCatalog } from "./catalog.js";
 import { toolOutputSchema, toolResult } from "./results.js";
@@ -75,9 +78,13 @@ export function registerDataFreshnessTool(
       let accountTimeZone: string | null = null;
       let todayCivil: string | null = null;
       if (
-        selected.some((type) =>
-          ["Daily", "Session"].includes(getCapability(type)?.kind ?? ""),
-        )
+        selected.some((type) => {
+          const capability = getCapability(type);
+          return (
+            capability?.kind === "Daily" ||
+            (capability?.kind === "Session" && type !== "sleep")
+          );
+        })
       ) {
         try {
           const settings = await api.request<JsonRecord>({
@@ -115,7 +122,8 @@ export function registerDataFreshnessTool(
               newestReturnedRecord: null,
             };
           if (
-            ["Daily", "Session"].includes(capability.kind) &&
+            (capability.kind === "Daily" ||
+              (capability.kind === "Session" && dataType !== "sleep")) &&
             (dailyStart === null || dailyEnd === null)
           )
             return {
@@ -128,13 +136,13 @@ export function registerDataFreshnessTool(
             const startBound =
               capability.kind === "Daily"
                 ? dailyStart!
-                : capability.kind === "Session"
+                : capability.kind === "Session" && dataType !== "sleep"
                   ? (dailyStart ?? "")
                   : physicalStart;
             const endBound =
               capability.kind === "Daily"
                 ? dailyEnd!
-                : capability.kind === "Session"
+                : capability.kind === "Session" && dataType !== "sleep"
                   ? (dailyEnd ?? "")
                   : physicalEnd;
             const points: JsonRecord[] = [];
@@ -143,6 +151,7 @@ export function registerDataFreshnessTool(
             for (let page = 0; page < 3; page += 1) {
               const result = await api.request<JsonRecord>({
                 methodId: "health.users.dataTypes.dataPoints.list",
+                apiVersion: defaultApiVersionForDataType(dataType),
                 pathParams: { parent: `users/me/dataTypes/${dataType}` },
                 query: {
                   filter: buildFreshnessFilter(
@@ -247,10 +256,12 @@ function buildFreshnessFilter(
     return `${capability.filterParameter}.interval.start_time >= "${start}" AND ${capability.filterParameter}.interval.start_time < "${end}"`;
   if (capability.kind === "Sample")
     return `${capability.filterParameter}.sample_time.physical_time >= "${start}" AND ${capability.filterParameter}.sample_time.physical_time < "${end}"`;
+  // Sleep freshness is bounded by the actual physical session end time;
+  // civil dates can miss sessions crossing midnight or lack civil fields.
   if (capability.slug === "sleep")
     return `sleep.interval.end_time >= "${start}" AND sleep.interval.end_time < "${end}"`;
   if (capability.slug === "electrocardiogram")
-    return `electrocardiogram.interval.start_time >= "${start}"`;
+    return `electrocardiogram.interval.start_time >= "${start}" AND electrocardiogram.interval.start_time < "${end}"`;
   if (capability.kind === "Session")
     return `${capability.filterParameter}.interval.civil_start_time >= "${start}T00:00:00" AND ${capability.filterParameter}.interval.civil_start_time < "${end}T00:00:00"`;
   throw new TypeError(
