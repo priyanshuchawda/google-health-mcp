@@ -51,14 +51,15 @@ Read the [architecture notes](docs/architecture.md) for the local/remote authori
 
 1. In Google Cloud, configure the OAuth consent screen for your own use and create an **OAuth client ID → Desktop app**. Download the client JSON to a private location outside this repository.
 2. Enable Google Health API for the project. No Google Cloud service account is used.
-3. Install and build:
+3. In Google Auth Platform → Data Access, add the Google Health API scopes requested by this build. Enabling the API and granting OAuth scopes are separate settings; a request with unapproved scopes is rejected by Google with `403 DISALLOWED_OAUTH_SCOPES`. The requested read scopes are listed in `allHealthScopes(false)` and supported write scopes in `allHealthScopes(true)` in [`src/auth/scopes.ts`](src/auth/scopes.ts). See Google's [OAuth setup instructions](https://developers.google.com/health/setup#add-scopes).
+4. Install and build:
 
    ```powershell
    npm ci
    npm run build
    ```
 
-4. Authorize read access. This opens Google's consent screen and stores an authorized-user refresh token under your user profile, outside the project:
+5. Authorize read access. This opens Google's consent screen and stores an authorized-user refresh token under your user profile, outside the project:
 
    ```powershell
    npm run auth -- --client-secrets C:\path\to\client_secret.json
@@ -68,13 +69,13 @@ Read the [architecture notes](docs/architecture.md) for the local/remote authori
 
    Add `--write` only if you want the local MCP server to write supported record types. Add `--project-admin` only if you intentionally want the opt-in project webhook tools. These two switches request additional Google permissions.
 
-5. Check the saved authorization by running:
+6. Check the saved authorization by running:
 
    ```powershell
    npm run doctor
    ```
 
-6. Start the local server:
+7. Start the local server:
 
    ```powershell
    npm run serve
