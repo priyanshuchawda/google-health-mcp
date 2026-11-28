@@ -115,6 +115,20 @@ function methodIsWrite(method: ApiMethod): boolean {
   return isWriteMethod(method);
 }
 
+function fetchFailureKind(error: unknown): string {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (message.includes("illegal invocation")) return "illegal_invocation";
+  if (message.includes("invalid url")) return "invalid_url";
+  if (message.includes("redirect")) return "redirect_rejected";
+  if (
+    message.includes("failed to fetch") ||
+    message.includes("fetch failed") ||
+    message.includes("network")
+  )
+    return "network_fetch_failure";
+  return "unclassified_fetch_failure";
+}
+
 export class HealthApi {
   private readonly tokenProvider: HealthTokenProvider;
   private readonly fetchImpl: typeof fetch;
@@ -207,6 +221,7 @@ export class HealthApi {
         console.warn("Google Health upstream fetch failed", {
           methodId: request.methodId,
           errorName: error instanceof Error ? error.name : typeof error,
+          failureKind: fetchFailureKind(error),
         });
       }
       throw new HealthApiError({
