@@ -202,6 +202,13 @@ export class HealthApi {
       if (error instanceof HealthApiError) throw error;
       const timedOut = controller.signal.aborted;
       const outcome = methodIsWrite(method) ? "uncertain" : "rejected";
+      if (!responseReceived && !timedOut) {
+        // Keep diagnostics useful without logging URLs, credentials, or data.
+        console.warn("Google Health upstream fetch failed", {
+          methodId: request.methodId,
+          errorName: error instanceof Error ? error.name : typeof error,
+        });
+      }
       throw new HealthApiError({
         methodId: request.methodId,
         outcome,
