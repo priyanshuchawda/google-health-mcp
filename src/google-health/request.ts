@@ -1,6 +1,6 @@
 import { getApiMethod, type ApiMethod } from "./capabilities.js";
 
-const API_ORIGIN = "https://health.googleapis.com";
+export const API_ORIGIN = "https://health.googleapis.com";
 
 export interface BuildUrlOptions {
   apiVersion?: "v4" | "v4beta";

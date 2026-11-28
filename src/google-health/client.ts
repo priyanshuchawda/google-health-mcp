@@ -6,7 +6,7 @@ import {
 } from "./capabilities.js";
 import { validateGoogleRequestBody } from "./body-validation.js";
 import { HealthApiError, PaginationLimitError } from "./errors.js";
-import { buildHealthUrl, isWriteMethod } from "./request.js";
+import { API_ORIGIN, buildHealthUrl, isWriteMethod } from "./request.js";
 
 export interface HealthTokenProvider {
   getAccessToken(scopes: readonly string[]): Promise<string>;
@@ -184,14 +184,55 @@ export class HealthApi {
 
     let responseReceived = false;
     try {
-      const response = await this.fetchImpl(url, {
-        method: method.httpMethod,
-        headers,
-        ...(hasBody ? { body: JSON.stringify(request.body) } : {}),
-        signal: controller.signal,
-        redirect: "error",
-      });
-      responseReceived = true;
+      let requestUrl = url;
+      let redirectCount = 0;
+      let response: Response;
+      while (true) {
+        response = await this.fetchImpl(requestUrl, {
+          method: method.httpMethod,
+          headers,
+          ...(hasBody ? { body: JSON.stringify(request.body) } : {}),
+          signal: controller.signal,
+          redirect: "manual",
+        });
+        responseReceived = true;
+        const location = response.headers.get("location");
+        if (response.status < 300 || response.status >= 400 || !location) break;
+
+        // Do not forward write payloads or bearer tokens to a redirect target.
+        if (methodIsWrite(method))
+          throw new HealthApiError({
+            methodId: request.methodId,
+            status: response.status,
+            outcome: "uncertain",
+            message:
+              "Google Health redirected a write request; verify the record before retrying.",
+          });
+
+        const target = new URL(location, requestUrl);
+        if (
+          target.origin !== API_ORIGIN ||
+          target.protocol !== "https:" ||
+          target.username !== "" ||
+          target.password !== ""
+        )
+          throw new HealthApiError({
+            methodId: request.methodId,
+            status: response.status,
+            outcome: "rejected",
+            message:
+              "Google Health redirected outside its trusted API origin; request stopped.",
+          });
+        if (redirectCount >= 2)
+          throw new HealthApiError({
+            methodId: request.methodId,
+            status: response.status,
+            outcome: "rejected",
+            message: "Google Health exceeded the safe redirect limit.",
+          });
+        requestUrl = target;
+        redirectCount += 1;
+      }
 
       if (!response.ok) {
         const uncertain = methodIsWrite(method) && response.status >= 500;

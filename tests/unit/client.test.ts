@@ -116,6 +116,87 @@ describe("Google Health API client", () => {
     ]);
   });
 
+  it("follows a Google API redirect only when it stays on the trusted origin", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 302,
+          headers: { location: "/v4/users/health-user-123/identity" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ name: "users/health-user-123/identity" }),
+      );
+    const api = new HealthApi({ tokenProvider, fetchImpl });
+
+    await expect(
+      api.request({
+        methodId: "health.users.getIdentity",
+        pathParams: { name: "users/me/identity" },
+      }),
+    ).resolves.toEqual({ name: "users/health-user-123/identity" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(String(fetchImpl.mock.calls[1]?.[0])).toBe(
+      "https://health.googleapis.com/v4/users/health-user-123/identity",
+    );
+    expect(fetchImpl.mock.calls[0]?.[1]?.redirect).toBe("manual");
+  });
+
+  it("refuses a Google API redirect to another origin", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: "https://attacker.example/collect" },
+        }),
+    );
+    const api = new HealthApi({ tokenProvider, fetchImpl });
+
+    await expect(
+      api.request({
+        methodId: "health.users.getIdentity",
+        pathParams: { name: "users/me/identity" },
+      }),
+    ).rejects.toMatchObject({ name: "HealthApiError", status: 302 });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("never resends a health-data write after a redirect", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 307,
+          headers: {
+            location: "https://health.googleapis.com/v4/users/me/next",
+          },
+        }),
+    );
+    const api = new HealthApi({ tokenProvider, fetchImpl });
+
+    await expect(
+      api.request({
+        methodId: "health.users.dataTypes.dataPoints.create",
+        pathParams: { parent: "users/me/dataTypes/sleep" },
+        body: {
+          sleep: {
+            interval: {
+              startTime: "2026-11-26T22:00:00Z",
+              endTime: "2026-11-26T23:00:00Z",
+              startUtcOffset: "0s",
+              endUtcOffset: "0s",
+            },
+          },
+        },
+      }),
+    ).rejects.toMatchObject({
+      name: "HealthApiError",
+      status: 307,
+      outcome: "uncertain",
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it("does not expose upstream error bodies that could contain sensitive data", async () => {
     const fetchImpl = vi.fn(async () =>
       Response.json(
