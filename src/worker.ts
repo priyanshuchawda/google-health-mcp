@@ -7,7 +7,7 @@ import {
 } from "@cloudflare/workers-oauth-provider";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { OAuth2Client } from "google-auth-library";
-import { allHealthScopes } from "./auth/scopes.js";
+import { allHealthScopes, DEFAULT_REMOTE_MCP_SCOPES } from "./auth/scopes.js";
 import { acceptedHealthScopes } from "./auth/granted-scopes.js";
 import { InsufficientHealthPermissionError } from "./auth/permission-errors.js";
 import { advertiseSupportedMcpScopes } from "./auth/resource-metadata.js";
@@ -447,7 +447,7 @@ function createProvider(env: Env): OAuthProvider<Env> {
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/oauth/token",
     scopesSupported: [MCP_READ, MCP_WRITE, "offline_access"],
-    requiredScopes: [MCP_READ],
+    requiredScopes: [...DEFAULT_REMOTE_MCP_SCOPES],
     resourceMetadata: {
       resource: resourceUrl,
       authorization_servers: [resourceOrigin],

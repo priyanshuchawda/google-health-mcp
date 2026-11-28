@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { allHealthScopes } from "../../src/auth/scopes.js";
+import {
+  allHealthScopes,
+  DEFAULT_REMOTE_MCP_SCOPES,
+} from "../../src/auth/scopes.js";
 
 describe("Google OAuth scope selection", () => {
   it("requests read scopes for the enabled catalog and special account tools", () => {
@@ -44,5 +47,9 @@ describe("Google OAuth scope selection", () => {
     expect(scopes).not.toContain(
       "https://www.googleapis.com/auth/cloud-platform",
     );
+  });
+
+  it("requests read and write MCP scopes by default on the private remote server", () => {
+    expect(DEFAULT_REMOTE_MCP_SCOPES).toEqual(["mcp:read", "mcp:write"]);
   });
 });

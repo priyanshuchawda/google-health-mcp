@@ -1,5 +1,8 @@
 import { dataTypes } from "../google-health/capabilities.js";
 
+/** The private hosted Worker asks ChatGPT for both supported MCP permissions. */
+export const DEFAULT_REMOTE_MCP_SCOPES = ["mcp:read", "mcp:write"] as const;
+
 /** Returns the scopes this build can use; write/admin scopes stay opt-in. */
 export function allHealthScopes(
   includeWrites = false,
