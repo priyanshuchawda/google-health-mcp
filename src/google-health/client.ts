@@ -236,13 +236,19 @@ export class HealthApi {
 
       if (!response.ok) {
         const uncertain = methodIsWrite(method) && response.status >= 500;
+        const upstreamStatus = await safeGoogleErrorStatus(
+          response,
+          this.maxResponseBytes,
+        );
         throw new HealthApiError({
           methodId: request.methodId,
           status: response.status,
           outcome: uncertain ? "uncertain" : "rejected",
           message: uncertain
             ? `Google Health returned HTTP ${response.status} after a write request; verify the record before retrying.`
-            : `Google Health rejected ${request.methodId} with HTTP ${response.status}.`,
+            : `Google Health rejected ${request.methodId} with HTTP ${response.status}` +
+              (upstreamStatus ? ` (${upstreamStatus})` : "") +
+              ".",
         });
       }
 
@@ -357,4 +363,28 @@ async function readResponseText(
     text += decoder.decode(value, { stream: true });
   }
   return text + decoder.decode();
+}
+
+async function safeGoogleErrorStatus(
+  response: Response,
+  maxResponseBytes: number,
+): Promise<string | undefined> {
+  if (!response.headers.get("content-type")?.includes("json")) return undefined;
+  try {
+    const text = await readResponseText(
+      response.clone(),
+      Math.min(maxResponseBytes, 64 * 1024),
+    );
+    const payload: unknown = JSON.parse(text);
+    if (!payload || typeof payload !== "object") return undefined;
+    const error = (payload as Record<string, unknown>)["error"];
+    if (!error || typeof error !== "object") return undefined;
+    const status = (error as Record<string, unknown>)["status"];
+    return typeof status === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(status)
+      ? status
+      : undefined;
+  } catch {
+    // Error bodies are untrusted and intentionally never returned or logged.
+    return undefined;
+  }
 }

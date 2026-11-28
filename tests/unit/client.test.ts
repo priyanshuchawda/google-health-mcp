@@ -222,6 +222,36 @@ describe("Google Health API client", () => {
     }
   });
 
+  it("surfaces only Google's safe status code from an API error body", async () => {
+    const api = new HealthApi({
+      tokenProvider,
+      fetchImpl: vi.fn(async () =>
+        Response.json(
+          {
+            error: {
+              status: "PERMISSION_DENIED",
+              message: "Private response details must not be exposed.",
+            },
+          },
+          { status: 403 },
+        ),
+      ),
+    });
+
+    await expect(
+      api.request({
+        methodId: "health.users.getIdentity",
+        pathParams: { name: "users/me/identity" },
+      }),
+    ).rejects.toThrow(/HTTP 403 \(PERMISSION_DENIED\)/);
+    await expect(
+      api.request({
+        methodId: "health.users.getIdentity",
+        pathParams: { name: "users/me/identity" },
+      }),
+    ).rejects.not.toThrow(/Private response details/);
+  });
+
   it("marks network failures on writes as uncertain and never retries them", async () => {
     const fetchImpl = vi.fn(async () => {
       throw new TypeError("connection reset");
