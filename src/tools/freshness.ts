@@ -82,7 +82,9 @@ export function registerDataFreshnessTool(
           const capability = getCapability(type);
           return (
             capability?.kind === "Daily" ||
-            (capability?.kind === "Session" && type !== "sleep")
+            (capability?.kind === "Session" &&
+              type !== "sleep" &&
+              type !== "electrocardiogram")
           );
         })
       ) {
@@ -123,7 +125,9 @@ export function registerDataFreshnessTool(
             };
           if (
             (capability.kind === "Daily" ||
-              (capability.kind === "Session" && dataType !== "sleep")) &&
+              (capability.kind === "Session" &&
+                dataType !== "sleep" &&
+                dataType !== "electrocardiogram")) &&
             (dailyStart === null || dailyEnd === null)
           )
             return {
@@ -136,13 +140,17 @@ export function registerDataFreshnessTool(
             const startBound =
               capability.kind === "Daily"
                 ? dailyStart!
-                : capability.kind === "Session" && dataType !== "sleep"
+                : capability.kind === "Session" &&
+                    dataType !== "sleep" &&
+                    dataType !== "electrocardiogram"
                   ? (dailyStart ?? "")
                   : physicalStart;
             const endBound =
               capability.kind === "Daily"
                 ? dailyEnd!
-                : capability.kind === "Session" && dataType !== "sleep"
+                : capability.kind === "Session" &&
+                    dataType !== "sleep" &&
+                    dataType !== "electrocardiogram"
                   ? (dailyEnd ?? "")
                   : physicalEnd;
             const points: JsonRecord[] = [];
@@ -261,7 +269,8 @@ function buildFreshnessFilter(
   if (capability.slug === "sleep")
     return `sleep.interval.end_time >= "${start}" AND sleep.interval.end_time < "${end}"`;
   if (capability.slug === "electrocardiogram")
-    return `electrocardiogram.interval.start_time >= "${start}" AND electrocardiogram.interval.start_time < "${end}"`;
+    // Google's filter grammar supports >= only for ECG start time.
+    return `electrocardiogram.interval.start_time >= "${start}"`;
   if (capability.kind === "Session")
     return `${capability.filterParameter}.interval.civil_start_time >= "${start}T00:00:00" AND ${capability.filterParameter}.interval.civil_start_time < "${end}T00:00:00"`;
   throw new TypeError(

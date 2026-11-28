@@ -209,7 +209,7 @@ describe("Google Health data freshness tool", () => {
     expect(request).toHaveBeenCalledOnce();
   });
 
-  it("bounds ECG freshness by physical time and automatically selects beta for beta-only types", async () => {
+  it("uses the supported physical ECG filter and selects beta for beta-only types", async () => {
     const requests: {
       methodId: string;
       apiVersion?: string;
@@ -234,8 +234,8 @@ describe("Google Health data freshness tool", () => {
         "skin_temperature_sensors.sample_time.physical_time",
       ),
     );
-    expect(ecg?.query?.filter).toContain(
-      " AND electrocardiogram.interval.start_time < ",
+    expect(ecg?.query?.filter).toMatch(
+      /^electrocardiogram\.interval\.start_time >= "\d{4}-\d{2}-\d{2}T.*Z"$/,
     );
     expect(ecg?.apiVersion).toBe("v4");
     expect(beta?.apiVersion).toBe("v4beta");

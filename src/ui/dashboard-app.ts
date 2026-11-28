@@ -63,7 +63,10 @@ const format = (value: unknown, digits = 0) =>
     : "—";
 const unwrap = (result: HealthData) => {
   const structured = object(result["structuredContent"]);
-  return object(structured["data"] ?? structured["settings"] ?? structured);
+  const payload = object(
+    structured["data"] ?? structured["settings"] ?? structured,
+  );
+  return object(payload["settings"] ?? payload["preferences"] ?? payload);
 };
 
 function effectiveTimeZone(): string {

@@ -79,6 +79,17 @@ const hostShim = `
       });
       return;
     }
+    if (message.method === "ui/notifications/initialized") {
+      window.postMessage({
+        jsonrpc: "2.0",
+        method: "ui/notifications/tool-result",
+        params: {
+          content: [{ type: "text", text: "synthetic initial summary" }],
+          structuredContent: { data: ${JSON.stringify(fixture)} },
+        },
+      }, "*");
+      return;
+    }
     if (message.method !== "tools/call") return;
     const name = message.params.name;
     window.__toolCalls.push({ name, args: message.params.arguments ?? {} });
@@ -93,7 +104,7 @@ const hostShim = `
     } else if (name === "get_data_freshness") {
       respond({ content: [{ type: "text", text: "synthetic freshness" }], structuredContent: { data: { dataTypes: [] } } });
     } else if (name === "settings.read") {
-      respond({ content: [{ type: "text", text: "synthetic preferences" }], structuredContent: { dailyStepsGoal: 8000, sleepHoursGoal: 8, hydrationMlGoal: 2500, weeklyExerciseMinutesGoal: 150 } });
+      respond({ content: [{ type: "text", text: "synthetic preferences" }], structuredContent: { data: { dailyStepsGoal: 8000, sleepHoursGoal: 8, hydrationMlGoal: 2500, weeklyExerciseMinutesGoal: 150 } } });
     } else if (name === "settings.update") {
       respond({ content: [{ type: "text", text: "synthetic preferences saved" }], structuredContent: { settings: message.params.arguments.set } });
     } else {
@@ -135,10 +146,12 @@ try {
       script.textContent.includes("ui/initialize"),
     ),
   }));
-  if (!String(initialState.status).includes("Updated from Google Health."))
-    throw new Error(
-      `Synthetic MCP handshake failed: ${JSON.stringify({ ...initialState, pageErrors })}`,
-    );
+  assert.ok(
+    initialState.messages.some((message) => message.method === "ui/initialize"),
+  );
+  await page.waitForFunction(() =>
+    window.__toolCalls.some((call) => call.name === "get_data_freshness"),
+  );
   await page
     .getByRole("heading", { name: "Personal target progress" })
     .waitFor();
