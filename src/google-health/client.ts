@@ -123,7 +123,10 @@ export class HealthApi {
 
   constructor(options: HealthApiOptions) {
     this.tokenProvider = options.tokenProvider;
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    // Native Worker fetch may depend on its global receiver. Invoking a bare
+    // fetch function as `this.fetchImpl(...)` binds `this` to this client.
+    this.fetchImpl =
+      options.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.maxResponseBytes = options.maxResponseBytes ?? 2 * 1024 * 1024;
   }

@@ -5,6 +5,7 @@ import { registerRecordTools } from "./records.js";
 import { registerSharedLinkTools } from "./shared-links.js";
 import { registerSummaryTool } from "./summaries.js";
 import { registerWebhookTools } from "./webhooks.js";
+import { registerDiscoveryTools } from "./discovery.js";
 
 export interface HealthToolOptions {
   projectAdminToolsEnabled?: boolean;
@@ -17,6 +18,7 @@ export function registerHealthTools(
   api: HealthApi,
   options: HealthToolOptions = {},
 ): void {
+  registerDiscoveryTools(server);
   registerRecordTools(server, api);
   registerSummaryTool(server, api);
   registerProfileTools(server, api);

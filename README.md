@@ -15,6 +15,8 @@ The checked-in capability snapshot contains all **44 Google Health data type ent
 
 | Tool                           | Purpose                                                                                                |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `list_data_types`              | Discover documented data types, scopes, record kinds, filters, and allowed operations                  |
+| `describe_schema`              | Inspect official request parameters and payload schemas before reading or writing                      |
 | `get_daily_health_summary`     | Google's source-civil-date rollups and reconciled sleep; account time zone is context, not an override |
 | `get_health_data`              | List, fetch, reconcile, or aggregate a documented health data type with pagination and date filters    |
 | `get_health_account_data`      | Read identity, profile, settings, paired devices, and IRN profile                                      |
@@ -33,6 +35,8 @@ Daily summaries use Google's own rollups where available; raw overlapping source
 The Google data type catalog does not expose native step or sleep goals through this project's supported user API methods. This server does not invent or write those goals. Webhook administration requires the broad `cloud-platform` permission and is disabled by default.
 
 See the complete [data type and supported operation list](docs/data-types.md).
+
+The catalog contains **44 record data types**. Some similarly named values are not data point types: Google describes basal energy burned as unavailable as its own type, while personal-range HRV and resting-heart-rate values appear in daily rollup results. The discovery tools expose only types in the reviewed API catalog.
 
 Read the [architecture notes](docs/architecture.md) for the local/remote authorization split and request lifecycle.
 
@@ -76,18 +80,34 @@ Read the [architecture notes](docs/architecture.md) for the local/remote authori
    npm run serve
    ```
 
-Configure your local MCP client to launch `node` with the absolute path to `dist/stdio.js` as its argument. Example:
+### npm distribution
+
+The repository is prepared for the `ghealth-mcp` npm package. The package is not published yet; after its first release, users can install it globally or run it with `npx`:
+
+```powershell
+npm install --global ghealth-mcp
+ghealth-mcp auth --client-secrets C:\path\to\client_secret.json
+ghealth-mcp doctor
+```
+
+Add `--write` to `auth` only when you want supported write scopes. The command opens Google sign-in, displays the data-flow disclosure in the terminal, and requires typing `AUTHORIZE`. Each user supplies their own OAuth Desktop client JSON; it remains outside the project. No maintainer credentials are included in the package.
+
+For Codex or another local MCP client, the post-release `npx` configuration is:
 
 ```json
 {
   "mcpServers": {
-    "google-health": {
-      "command": "node",
-      "args": ["C:/path/to/GoogleHealthMCP/dist/stdio.js"]
+    "ghealth": {
+      "command": "npx",
+      "args": ["--yes", "ghealth-mcp"]
     }
   }
 }
 ```
+
+The executable starts stdio when invoked without arguments. Before the first npm release, clone the repository and use the source setup commands above.
+
+The project does not require paid infrastructure or an AI API. GitHub Actions for this public repository and the optional Cloudflare Worker target their free offerings; platform eligibility, quotas, and Google OAuth requirements still apply. Do not enable billing for this project unless you intentionally choose a paid service.
 
 For local project webhook tools, set `GOOGLE_HEALTH_ENABLE_PROJECT_ADMIN=true` and `GOOGLE_HEALTH_PROJECT_NUMBER` in the MCP process environment. The OAuth credentials must also have been granted project-admin scope using `--project-admin`.
 
@@ -151,6 +171,12 @@ For local Worker development, copy `.dev.vars.example` to `.dev.vars`; edit only
 
 After deployment, configure the MCP client with the Worker endpoint `https://<worker-name>.<your-subdomain>.workers.dev/mcp` and complete both consent steps. If the account uses Google OAuth Testing mode, refresh tokens can expire under Google's testing rules; configure the OAuth audience appropriately for personal use and verify the current Google policy.
 
+### Self-hosting and public service scope
+
+Each self-hosted Worker is configured with its own `HEALTH_ALLOWED_EMAIL` secret, so another developer can deploy this repository for their own account without editing source. The checked-in/personal deployment remains single-account restricted. Removing that restriction to host a service for arbitrary Google accounts is a separate product and compliance decision; Google Health restricted-scope verification and applicable security assessment requirements must be reviewed before offering it. Public source code does not mean public access to any deployed user's records.
+
+The optional Worker uses the Cloudflare Free Worker and KV offerings. No paid database, domain, server, polling job, or external AI API is required by the design. Quotas and free-plan eligibility are controlled by Google and Cloudflare; this project does not enable billing.
+
 ### ChatGPT
 
 From ChatGPT on the web, open **Plugins → Add custom MCP server**, enter the deployed `/mcp` URL, and complete the server OAuth flow followed by the Google Health consent flow. Review the discovered tools before enabling them. OpenAI's current plan availability differs: its Help Center says full read/write MCP access is available on Business, Enterprise, and Edu, while Pro is limited to read/fetch; Plus availability is not promised. Check the current [ChatGPT custom MCP requirements](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt) for your account before relying on write tools. The local stdio mode can also be used with other MCP clients such as Codex.
@@ -178,7 +204,10 @@ npm run typecheck
 npm test
 npm run build
 npm run worker:dry-run
+npm run smoke:package
 ```
+
+GitHub Actions runs these checks for the public repository. The `release.yml` workflow is prepared to publish a public npm package with Trusted Publishing after a GitHub Release is published. npm requires an initial package to exist before its trusted publisher can be configured; that first publication is a maintainer bootstrap step and has not been performed. Configure npm's trusted publisher for this repository and `.github/workflows/release.yml` after the package exists. There is no npm token stored in GitHub or this repository.
 
 Tests use synthetic or mocked data. They do not prove live account permissions or write support. Never run a create, update, or delete tool against real Google Health records unless you intentionally authorized that action.
 

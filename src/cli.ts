@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { resolve } from "node:path";
@@ -97,16 +98,19 @@ function printHelp(): void {
   process.stdout.write(
     [
       "Google Health MCP local commands:",
-      "  npm run auth -- --client-secrets <OAuth-desktop-client.json> [--write] [--project-admin] [--credentials <path>]",
-      "  npm run serve -- [--credentials <path>]",
-      "  npm run doctor -- [--credentials <path>]",
+      "  ghealth-mcp auth --client-secrets <OAuth-desktop-client.json> [--write] [--project-admin] [--credentials <path>]",
+      "  ghealth-mcp doctor [--credentials <path>]",
+      "  ghealth-mcp                 Start the MCP stdio server",
+      "  ghealth-mcp serve [--credentials <path>]",
     ].join("\n") + "\n",
   );
 }
 
 export async function runCli(args = process.argv.slice(2)): Promise<void> {
   const [command, ...options] = args;
-  if (!command || command === "--help" || command === "-h") return printHelp();
+  // MCP hosts launch the package without arguments; use stdio by default.
+  if (!command) return serveLocalStdio();
+  if (command === "--help" || command === "-h") return printHelp();
   if (
     options.some(
       (item) =>

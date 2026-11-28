@@ -75,6 +75,24 @@ describe("Google Health API request construction", () => {
 });
 
 describe("Google Health API client", () => {
+  it("calls the default native fetch in the global context", async () => {
+    const nativeFetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async function (this: typeof globalThis) {
+        expect(this).toBe(globalThis);
+        return Response.json({ name: "users/me/profile", height: 1.7 });
+      });
+    const api = new HealthApi({ tokenProvider });
+
+    await expect(
+      api.request({
+        methodId: "health.users.getProfile",
+        pathParams: { name: "users/me/profile" },
+      }),
+    ).resolves.toEqual({ name: "users/me/profile", height: 1.7 });
+    expect(nativeFetch).toHaveBeenCalledOnce();
+  });
+
   it("sends the Google token only to the Google API and returns parsed JSON", async () => {
     const fetchImpl = vi.fn(
       async (_input: RequestInfo | URL, init?: RequestInit) => {

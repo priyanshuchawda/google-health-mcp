@@ -1,18 +1,59 @@
 {
-  "name": "google-health-mcp",
+  "name": "ghealth-mcp",
   "version": "0.1.0",
   "private": false,
   "type": "module",
-  "description": "A personal Google Health API MCP server for local and authenticated Cloudflare Workers use.",
+  "description": "A Google Health API MCP server for local stdio and self-hosted Cloudflare Workers.",
   "license": "MIT",
+  "author": "Priyanshu Chawda",
+  "homepage": "https://github.com/priyanshuchawda/google-health-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/priyanshuchawda/google-health-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/priyanshuchawda/google-health-mcp/issues"
+  },
+  "keywords": [
+    "google-health",
+    "fitbit",
+    "pixel-watch",
+    "mcp",
+    "model-context-protocol",
+    "health-data"
+  ],
   "engines": {
     "node": ">=22.12.0"
+  },
+  "bin": {
+    "ghealth-mcp": "./dist/src/cli.js"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist/src",
+    "dist/spec",
+    "README.md",
+    "PRIVACY.md",
+    "SECURITY.md",
+    "THIRD_PARTY_NOTICES.md",
+    "docs/data-types.md"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "dev": "tsx watch src/stdio.ts",
     "auth": "tsx src/cli.ts auth",
     "serve": "tsx src/stdio.ts",
     "doctor": "tsx src/cli.ts doctor",
+    "smoke:package": "node scripts/package-smoke.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
@@ -23,7 +64,8 @@
     "worker:dev": "wrangler dev",
     "worker:dry-run": "wrangler deploy --dry-run",
     "spec:update": "tsx scripts/update-spec.ts",
-    "docs:data-types": "tsx scripts/render-data-types.ts"
+    "docs:data-types": "tsx scripts/render-data-types.ts",
+    "prepack": "npm run build && node scripts/prepare-package.mjs"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "1.4.0",
@@ -34,6 +76,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261127.1",
     "@eslint/js": "10.0.1",
+    "@modelcontextprotocol/client": "^2.4.0",
     "@types/node": "26.6.11",
     "eslint": "10.15.0",
     "prettier": "3.10.1",

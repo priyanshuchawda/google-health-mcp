@@ -2,7 +2,7 @@
 
 This table is the checked-in capability snapshot used by the generic MCP data tools. It was reviewed against [Google's data type catalog](https://developers.google.com/health/data-types) on 2026-11-27. The exact API methods and request/response schemas come from the official discovery documents tracked in [api-methods.json](../spec/api-methods.json).
 
-The operation list is authoritative for tool validation: reads and writes are checked per data type before a request is sent. Scope categories are shown for orientation; see Google's current documentation for their exact semantics. The food resource is a reference collection, not a personal meal log. This server does not infer native goals from this catalog.
+The operation list is authoritative for tool validation: reads and writes are checked per data type before a request is sent. Scope categories are shown for orientation; see Google's current documentation for their exact semantics. The food resource is a reference collection, not a personal meal log. This server does not infer native goals from this catalog. Some discovery-schema fields are not standalone data types: Google documents basal energy burned as unavailable as its own type, and the HRV/resting-heart-rate personal ranges as daily rollup values.
 
 | Slug                                  | Kind     | Supported operations                                                                  | OAuth scope categories          |
 | ------------------------------------- | -------- | ------------------------------------------------------------------------------------- | ------------------------------- |

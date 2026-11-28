@@ -18,6 +18,30 @@ const prefix = "health.users.dataTypes.dataPoints.";
 
 export const toolCatalog: readonly HealthToolDefinition[] = Object.freeze([
   {
+    name: "list_data_types",
+    title: "List Google Health data types",
+    description:
+      "List the Google Health API data types this server documents, including record kind, supported operations, OAuth categories, and filter fields. This does not access personal health records.",
+    methodIds: [],
+    annotations: {
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  {
+    name: "describe_schema",
+    title: "Describe a Google Health schema",
+    description:
+      "Describe a supported Google Health data type, its allowed API operations, request parameters, and discovery-schema payload shape. Use this before creating or updating a record.",
+    methodIds: [],
+    annotations: {
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  {
     name: "get_daily_health_summary",
     title: "Get a daily health summary",
     description:
