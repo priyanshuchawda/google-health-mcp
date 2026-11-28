@@ -8,6 +8,7 @@ import {
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { OAuth2Client } from "google-auth-library";
 import { allHealthScopes } from "./auth/scopes.js";
+import { compareGrantedScopes } from "./auth/granted-scopes.js";
 import { googleAuthorizationOptions } from "./auth/google-authorization.js";
 import {
   renderConsentMarkup,
@@ -269,9 +270,17 @@ async function handleGoogleCallback(
     );
 
   const actualScopes = (tokens.scope ?? "").split(/\s+/).filter(Boolean);
-  const missing = resumed.data.googleScopes.filter(
-    (scope) => !actualScopes.includes(scope),
+  const { missing, unexpected } = compareGrantedScopes(
+    actualScopes,
+    resumed.data.googleScopes,
+    ["openid", "email", "https://www.googleapis.com/auth/userinfo.email"],
   );
+  if (unexpected.length)
+    return htmlPage(
+      "Unexpected Google permissions",
+      `<p>Google returned ${unexpected.length} permission(s) that were not requested. No authorization was saved. Disconnect only this MCP connection, then reconnect and approve its listed permissions.</p>`,
+      403,
+    );
   if (missing.length)
     return htmlPage(
       "Google Health permissions incomplete",
@@ -288,7 +297,9 @@ async function handleGoogleCallback(
       subject: identity.sub,
       email: identity.email,
       refreshToken: tokens.refresh_token,
-      googleScopes: actualScopes,
+      googleScopes: actualScopes.filter((scope) =>
+        scope.startsWith("https://www.googleapis.com/auth/googlehealth."),
+      ),
     } satisfies GoogleGrant,
   });
   resumed.headers.set("location", redirect.redirectTo);

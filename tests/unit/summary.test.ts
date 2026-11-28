@@ -130,10 +130,103 @@ describe("daily Google Health summary", () => {
       light: 60,
       rem: 60,
       awake: 60,
+      asleep: null,
+      restless: null,
     });
     expect(summary.metrics.primarySleep).toEqual({
       startTime: "2026-11-25T22:00:00Z",
       endTime: "2026-11-26T02:00:00Z",
+    });
+  });
+
+  it("does not classify a nap as primary sleep and preserves missing stages", () => {
+    const summary = buildDailySummary({
+      date: "2026-11-26",
+      timeZone: "Asia/Kolkata",
+      rollups: {},
+      sleep: {
+        dataPoints: [
+          {
+            name: "nap",
+            sleep: {
+              type: "CLASSIC",
+              interval: {
+                startTime: "2026-11-26T09:00:00Z",
+                endTime: "2026-11-26T10:00:00Z",
+              },
+              summary: {
+                minutesAsleep: "45",
+                stagesSummary: [{ type: "ASLEEP", minutes: "45" }],
+              },
+              metadata: { nap: true },
+            },
+          },
+        ],
+      },
+    });
+
+    expect(summary.metrics.primarySleep).toBeNull();
+    expect(summary.sleepSessions[0]).toMatchObject({
+      nap: true,
+      sleepType: "CLASSIC",
+    });
+    expect(summary.metrics.sleepStagesMinutes).toEqual({
+      deep: null,
+      light: null,
+      rem: null,
+      awake: null,
+      asleep: 45,
+      restless: null,
+    });
+  });
+
+  it("prefers Google's computed classic stage summary over raw intervals", () => {
+    const summary = buildDailySummary({
+      date: "2026-11-26",
+      timeZone: "UTC",
+      rollups: {},
+      sleep: {
+        dataPoints: [
+          {
+            name: "classic-main",
+            sleep: {
+              type: "CLASSIC",
+              interval: {
+                startTime: "2026-11-25T22:00:00Z",
+                endTime: "2026-11-26T06:00:00Z",
+              },
+              summary: {
+                minutesAsleep: "420",
+                stagesSummary: [
+                  { type: "ASLEEP", minutes: "420" },
+                  { type: "RESTLESS", minutes: "20" },
+                ],
+              },
+              metadata: { mainSleep: true, nap: false },
+              stages: [
+                {
+                  type: "ASLEEP",
+                  startTime: "2026-11-25T22:00:00Z",
+                  endTime: "2026-11-26T05:00:00Z",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    expect(summary.metrics.sleepStagesMinutes).toEqual({
+      deep: null,
+      light: null,
+      rem: null,
+      awake: null,
+      asleep: 420,
+      restless: 20,
+    });
+    expect(summary.metrics.primarySleep).toEqual({
+      startTime: "2026-11-25T22:00:00Z",
+      endTime: "2026-11-26T06:00:00Z",
     });
   });
 });

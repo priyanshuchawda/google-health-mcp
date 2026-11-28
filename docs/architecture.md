@@ -16,13 +16,13 @@ MCP client
 
 ## Local stdio
 
-The `auth` command uses Google's maintained `google-auth-library` OAuth client with authorization code flow, PKCE and a loopback-only callback. It stores the OAuth client ID and secret, refresh credential, and granted scopes in a private per-user configuration file outside the repository. The server refreshes short-lived access tokens when needed and checks every requested scope against the stored grant.
+The `auth` command uses Google's maintained `google-auth-library` OAuth client with authorization code flow, PKCE and a loopback-only callback. It disables incremental scope merging so unrelated prior Google API grants are not carried into a Health token, and refuses to save a token that reports unrequested scopes. It stores the OAuth client ID and secret, refresh credential, and granted Health scopes in a private per-user configuration file outside the repository. The server refreshes short-lived access tokens when needed and checks every requested scope against the stored grant.
 
 ## Remote Worker
 
 Cloudflare's maintained Workers OAuth Provider issues MCP access tokens and stores OAuth state and grants in the bound KV namespace. A consent page discloses that requested data will be returned to the MCP client. After consent, the user completes a separate Google OAuth flow. The callback verifies Google's signed identity token, nonce, verified email and configured account allowlist before issuing the MCP authorization grant.
 
-The Google refresh token is stored in the provider's encrypted grant properties. Each authenticated `/mcp` request receives the verified grant properties and MCP scopes. `mcp:write` is required in addition to a Google write scope for mutation tools. MCP bearer tokens are never forwarded to Google. The Worker checks the account allowlist on each request, so changing it disables existing grants for the old account.
+The Google refresh token is stored in the provider's encrypted grant properties. The upstream Google authorization does not merge previously granted scopes and rejects unexpected returned scopes before saving. Only requested Google Health scopes are stored as API capabilities; OpenID scopes are requested solely to verify the allowlisted Google identity. Each authenticated `/mcp` request receives the verified grant properties and MCP scopes. `mcp:write` is required in addition to a Google write scope for mutation tools. MCP bearer tokens are never forwarded to Google. The Worker checks the account allowlist on each request, so changing it disables existing grants for the old account.
 
 Remote project webhook administration is intentionally not exposed: it requires a broad Google Cloud project permission and is not part of the personal health-data path.
 

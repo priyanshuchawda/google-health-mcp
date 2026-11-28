@@ -37,6 +37,116 @@ async function fixture(scopes: string[]): Promise<string> {
 }
 
 describe("local Google OAuth credentials", () => {
+  it("does not merge previously granted scopes into local authorization", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ghmcp-auth-scope-isolation-"));
+    directories.push(dir);
+    const clientSecretsPath = join(dir, "client_secret.json");
+    const credentialsOutputPath = join(dir, "credentials.json");
+    await writeFile(
+      clientSecretsPath,
+      JSON.stringify({
+        installed: {
+          client_id: "synthetic-client-id",
+          client_secret: "synthetic-client-secret",
+        },
+      }),
+    );
+    let redirectUri = "";
+    let authOptions: Record<string, unknown> | undefined;
+    let requestedScopes: string[] = [];
+    const oauth = {
+      generateCodeVerifierAsync: vi.fn(async () => ({
+        codeVerifier: "synthetic-verifier",
+        codeChallenge: "synthetic-challenge",
+      })),
+      generateAuthUrl: vi.fn((options: Record<string, unknown>) => {
+        authOptions = options;
+        requestedScopes = options["scope"] as string[];
+        return `https://accounts.google.com/synthetic?state=${options["state"]}`;
+      }),
+      getToken: vi.fn(async () => ({
+        tokens: {
+          refresh_token: "synthetic-refresh-token",
+          scope: requestedScopes.join(" "),
+        },
+      })),
+      setCredentials: vi.fn(),
+      getAccessToken: vi.fn(),
+    } as unknown as GoogleOAuthClient;
+
+    await runLocalAuthorization({
+      clientSecretsPath,
+      credentialsOutputPath,
+      oauthClientFactory: (options) => {
+        redirectUri = options.redirectUri ?? "";
+        return oauth;
+      },
+      openBrowser: (url) => {
+        const state = new URL(url).searchParams.get("state");
+        void fetch(`${redirectUri}?code=synthetic-code&state=${state}`);
+      },
+      confirmAccess: async () => true,
+    });
+
+    expect(authOptions?.["include_granted_scopes"]).toBe(false);
+    expect(await loadLocalCredentials(credentialsOutputPath)).toMatchObject({
+      refresh_token: "synthetic-refresh-token",
+      scopes: requestedScopes,
+    });
+  });
+
+  it("rejects unexpected scopes returned for a local authorization", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ghmcp-auth-scope-reject-"));
+    directories.push(dir);
+    const clientSecretsPath = join(dir, "client_secret.json");
+    const credentialsOutputPath = join(dir, "credentials.json");
+    await writeFile(
+      clientSecretsPath,
+      JSON.stringify({
+        installed: {
+          client_id: "synthetic-client-id",
+          client_secret: "synthetic-client-secret",
+        },
+      }),
+    );
+    let redirectUri = "";
+    const oauth = {
+      generateCodeVerifierAsync: vi.fn(async () => ({
+        codeVerifier: "synthetic-verifier",
+        codeChallenge: "synthetic-challenge",
+      })),
+      generateAuthUrl: vi.fn(
+        (options: Record<string, unknown>) =>
+          `https://accounts.google.com/synthetic?state=${options["state"]}`,
+      ),
+      getToken: vi.fn(async () => ({
+        tokens: {
+          refresh_token: "synthetic-refresh-token",
+          scope: `${allHealthScopes().join(" ")} https://www.googleapis.com/auth/fitness.activity.read`,
+        },
+      })),
+      setCredentials: vi.fn(),
+      getAccessToken: vi.fn(),
+    } as unknown as GoogleOAuthClient;
+
+    await expect(
+      runLocalAuthorization({
+        clientSecretsPath,
+        credentialsOutputPath,
+        oauthClientFactory: (options) => {
+          redirectUri = options.redirectUri ?? "";
+          return oauth;
+        },
+        openBrowser: (url) => {
+          const state = new URL(url).searchParams.get("state");
+          void fetch(`${redirectUri}?code=synthetic-code&state=${state}`);
+        },
+        confirmAccess: async () => true,
+      }),
+    ).rejects.toThrow(/unexpected OAuth permission/i);
+    await expect(loadLocalCredentials(credentialsOutputPath)).rejects.toThrow();
+  });
+
   it("requires explicit data-sharing consent before opening Google's OAuth page", async () => {
     const dir = await mkdtemp(join(tmpdir(), "ghmcp-auth-consent-"));
     directories.push(dir);

@@ -10,6 +10,7 @@ import {
   type Credentials,
 } from "google-auth-library";
 import type { HealthTokenProvider } from "../google-health/client.js";
+import { compareGrantedScopes } from "./granted-scopes.js";
 import { allHealthScopes } from "./scopes.js";
 export { allHealthScopes } from "./scopes.js";
 
@@ -177,7 +178,8 @@ export async function runLocalAuthorization(
       access_type: "offline",
       scope: scopes,
       prompt: "consent",
-      include_granted_scopes: true,
+      // Do not silently add scopes granted earlier to another Google API.
+      include_granted_scopes: false,
       state,
       code_challenge: codeChallenge,
       code_challenge_method: CodeChallengeMethod.S256,
@@ -201,16 +203,20 @@ export async function runLocalAuthorization(
       throw new Error(
         "Google did not return a refresh token; revoke access and authorize again.",
       );
+    const grantedScopes = token.tokens.scope
+      ? token.tokens.scope.split(/\s+/).filter(Boolean)
+      : scopes;
+    const { unexpected } = compareGrantedScopes(grantedScopes, scopes);
+    if (unexpected.length)
+      throw new Error(
+        `Google returned ${unexpected.length} unexpected OAuth permission(s). No credentials were saved; remove unrelated permissions from this authorization and try again.`,
+      );
     const credentials = credentialsSchema.parse({
       type: "authorized_user",
       client_id: client.client_id,
       client_secret: client.client_secret,
       refresh_token: refreshToken,
-      scopes: token.tokens.scope
-        ? scopes.filter((scope) =>
-            token.tokens.scope!.split(" ").includes(scope),
-          )
-        : scopes,
+      scopes: scopes.filter((scope) => grantedScopes.includes(scope)),
     });
     const outputPath = options.credentialsOutputPath ?? credentialsPath();
     await saveLocalCredentials(outputPath, credentials);

@@ -169,7 +169,18 @@ export function buildDailySummary(input: DailySummaryInput): JsonRecord {
           typeof interval["endTime"] === "string" ? interval["endTime"] : null,
         minutesAsleep: finiteNumber(summary["minutesAsleep"]),
         minutesInSleepPeriod: finiteNumber(summary["minutesInSleepPeriod"]),
-        mainSleep: metadata["mainSleep"] === true,
+        mainSleep:
+          typeof metadata["mainSleep"] === "boolean"
+            ? metadata["mainSleep"]
+            : null,
+        nap: typeof metadata["nap"] === "boolean" ? metadata["nap"] : null,
+        sleepType: typeof sleep["type"] === "string" ? sleep["type"] : null,
+        stagesSummary: Array.isArray(summary["stagesSummary"])
+          ? summary["stagesSummary"].map(object)
+          : null,
+        stageIntervals: Array.isArray(sleep["stages"])
+          ? sleep["stages"].map(object)
+          : null,
       };
     })
     .sort((a, b) => (a.startTime ?? "").localeCompare(b.startTime ?? ""));
@@ -209,37 +220,49 @@ export function buildDailySummary(input: DailySummaryInput): JsonRecord {
           0,
         );
 
-  const stageSegments = ordered.flatMap((session) => {
-    const source = sleepPoints.find(
-      (point) => (point["dataPointName"] ?? point["name"]) === session.name,
-    );
-    const sleep = object(source?.["sleep"]);
-    return Array.isArray(sleep["stages"]) ? sleep["stages"].map(object) : [];
-  });
-  const stagesAvailable = ordered.some((session) => {
-    const source = sleepPoints.find(
-      (point) => (point["dataPointName"] ?? point["name"]) === session.name,
-    );
-    return Array.isArray(object(source?.["sleep"])["stages"]);
-  });
-  const sleepStageMinutes = stagesAvailable
-    ? (stage: string): number | null => {
-        if (hasOverlap) return null;
-        let total = 0;
-        for (const segment of stageSegments) {
-          if (segment["type"] !== stage) continue;
-          const start = Date.parse(String(segment["startTime"] ?? ""));
-          const end = Date.parse(String(segment["endTime"] ?? ""));
-          if (!Number.isFinite(start) || !Number.isFinite(end) || end < start)
-            return null;
-          total += (end - start) / 60_000;
-        }
-        return Math.round(total);
+  const sleepStageMinutes = (stage: string): number | null => {
+    if (ordered.length === 0 || hasOverlap) return null;
+    let total = 0;
+    for (const session of ordered) {
+      // Google computes stage totals server-side; prefer them over local math.
+      if (session.stagesSummary !== null) {
+        const stageSummary = session.stagesSummary.find(
+          (item) => item["type"] === stage,
+        );
+        if (!stageSummary) return null;
+        const minutes = finiteNumber(stageSummary["minutes"]);
+        if (minutes === null) return null;
+        total += minutes;
+        continue;
       }
-    : () => null;
+
+      if (session.stageIntervals === null) return null;
+      const matching = session.stageIntervals.filter(
+        (segment) => segment["type"] === stage,
+      );
+      if (matching.length === 0) return null;
+      for (const segment of matching) {
+        const start = Date.parse(String(segment["startTime"] ?? ""));
+        const end = Date.parse(String(segment["endTime"] ?? ""));
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end < start)
+          return null;
+        total += (end - start) / 60_000;
+      }
+    }
+    return Math.round(total);
+  };
   const primarySleep =
-    ordered.find((session) => session.mainSleep) ??
-    (ordered.length === 1 ? ordered[0] : undefined);
+    ordered.find((session) => session.mainSleep === true) ??
+    (() => {
+      const nonNaps = ordered.filter((session) => session.nap !== true);
+      return nonNaps.length === 1 ? nonNaps[0] : undefined;
+    })();
+  const publicSleepSessions = ordered.map((session) => {
+    const output = { ...session };
+    Reflect.deleteProperty(output, "stagesSummary");
+    Reflect.deleteProperty(output, "stageIntervals");
+    return output;
+  });
 
   return {
     date: input.date,
@@ -263,6 +286,8 @@ export function buildDailySummary(input: DailySummaryInput): JsonRecord {
         light: sleepStageMinutes("LIGHT"),
         rem: sleepStageMinutes("REM"),
         awake: sleepStageMinutes("AWAKE"),
+        asleep: sleepStageMinutes("ASLEEP"),
+        restless: sleepStageMinutes("RESTLESS"),
       },
       primarySleep: primarySleep
         ? {
@@ -271,7 +296,7 @@ export function buildDailySummary(input: DailySummaryInput): JsonRecord {
           }
         : null,
     },
-    sleepSessions: ordered,
+    sleepSessions: publicSleepSessions,
     dataQuality: {
       rollupTypesReturned: ROLLUP_TYPES.filter(
         (type) => input.rollups[type] !== undefined,

@@ -75,6 +75,26 @@ describe("Google Health API request construction", () => {
 });
 
 describe("Google Health API client", () => {
+  it.each([
+    ["health.users.pairedDevices.list", { parent: "users/me" }],
+    [
+      "health.users.pairedDevices.get",
+      { name: "users/me/pairedDevices/device-1" },
+    ],
+  ])("requests the settings scope for %s", async (methodId, pathParams) => {
+    const getAccessToken = vi.fn(async () => "synthetic-access-token");
+    const api = new HealthApi({
+      tokenProvider: { getAccessToken },
+      fetchImpl: async () => Response.json({ pairedDevices: [] }),
+    });
+
+    await api.request({ methodId, pathParams });
+
+    expect(getAccessToken).toHaveBeenCalledWith([
+      "https://www.googleapis.com/auth/googlehealth.settings.readonly",
+    ]);
+  });
+
   it("calls the default native fetch in the global context", async () => {
     const nativeFetch = vi
       .spyOn(globalThis, "fetch")

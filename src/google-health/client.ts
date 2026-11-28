@@ -53,10 +53,10 @@ const SPECIAL_METHOD_SCOPES: Readonly<Record<string, readonly string[]>> = {
     "https://www.googleapis.com/auth/googlehealth.settings.writeonly",
   ],
   "health.users.pairedDevices.get": [
-    "https://www.googleapis.com/auth/googlehealth.profile.readonly",
+    "https://www.googleapis.com/auth/googlehealth.settings.readonly",
   ],
   "health.users.pairedDevices.list": [
-    "https://www.googleapis.com/auth/googlehealth.profile.readonly",
+    "https://www.googleapis.com/auth/googlehealth.settings.readonly",
   ],
   "health.shl.m.getShlManifest": [
     "https://www.googleapis.com/auth/googlehealth.profile.readonly",
