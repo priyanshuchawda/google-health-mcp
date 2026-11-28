@@ -231,6 +231,7 @@ describe("Google Health API client", () => {
             error: {
               status: "PERMISSION_DENIED",
               message: "Private response details must not be exposed.",
+              details: [{ reason: "ACCESS_TOKEN_SCOPE_INSUFFICIENT" }],
             },
           },
           { status: 403 },
@@ -243,7 +244,9 @@ describe("Google Health API client", () => {
         methodId: "health.users.getIdentity",
         pathParams: { name: "users/me/identity" },
       }),
-    ).rejects.toThrow(/HTTP 403 \(PERMISSION_DENIED\)/);
+    ).rejects.toThrow(
+      /HTTP 403 \(PERMISSION_DENIED\/ACCESS_TOKEN_SCOPE_INSUFFICIENT\)/,
+    );
     await expect(
       api.request({
         methodId: "health.users.getIdentity",

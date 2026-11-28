@@ -379,10 +379,26 @@ async function safeGoogleErrorStatus(
     if (!payload || typeof payload !== "object") return undefined;
     const error = (payload as Record<string, unknown>)["error"];
     if (!error || typeof error !== "object") return undefined;
-    const status = (error as Record<string, unknown>)["status"];
-    return typeof status === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(status)
-      ? status
+    const errorRecord = error as Record<string, unknown>;
+    const status = errorRecord["status"];
+    const safeStatus =
+      typeof status === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(status)
+        ? status
+        : undefined;
+    const details = errorRecord["details"];
+    const reason = Array.isArray(details)
+      ? details
+          .map((detail) =>
+            detail && typeof detail === "object"
+              ? (detail as Record<string, unknown>)["reason"]
+              : undefined,
+          )
+          .find(
+            (value): value is string =>
+              typeof value === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(value),
+          )
       : undefined;
+    return [safeStatus, reason].filter(Boolean).join("/") || undefined;
   } catch {
     // Error bodies are untrusted and intentionally never returned or logged.
     return undefined;
