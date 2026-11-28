@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { describe, expect, it, vi } from "vitest";
 import { registerRangeSummaryTool } from "../../src/tools/range-summary.js";
+import { HealthApiError } from "../../src/google-health/errors.js";
 
 function captureRangeSummary(api: { request: ReturnType<typeof vi.fn> }) {
   let handler: ((input: never) => Promise<unknown>) | undefined;
@@ -177,6 +178,14 @@ describe("date-range health summary MCP handler", () => {
       value: 30,
       unit: "min",
     });
+    const exercises = daily[1]?.["exerciseSessions"] as Record<
+      string,
+      unknown
+    >[];
+    expect(exercises[0]?.["civilStartTime"]).toMatchObject({
+      date: { year: 2026, month: 11, day: 24 },
+      time: { hours: 11, minutes: 8, seconds: 0 },
+    });
     expect(
       (summary.dataCompleteness as Record<string, { daysReported: number }>)[
         "hydration"
@@ -186,5 +195,52 @@ describe("date-range health summary MCP handler", () => {
       requests.find((item) => item.pathParams?.parent?.endsWith("/exercise"))
         ?.query?.filter,
     ).toContain('"2026-11-23T00:00:00"');
+  });
+
+  it("reports a failed metric with a useful reason while preserving successful metrics", async () => {
+    const request = vi.fn(
+      async (input: {
+        methodId: string;
+        pathParams?: Record<string, string>;
+      }) => {
+        if (input.methodId === "health.users.getSettings")
+          return { timeZone: "Asia/Kolkata" };
+        if (input.methodId.endsWith(".dailyRollUp")) {
+          if (input.pathParams?.parent === "users/me/dataTypes/steps")
+            throw new HealthApiError({
+              methodId: input.methodId,
+              status: 403,
+              outcome: "rejected",
+              message: "permission denied",
+            });
+          return { rollupDataPoints: [] };
+        }
+        if (input.methodId.endsWith(".list")) return {};
+        if (input.methodId.endsWith(".reconcile")) return {};
+        throw new Error(`Unexpected method ${input.methodId}`);
+      },
+    );
+    const handler = captureRangeSummary({ request });
+    const response = (await handler({
+      startDate: "2026-11-28",
+      endDate: "2026-11-28",
+    } as never)) as { structuredContent: { data: Record<string, unknown> } };
+    const summary = response.structuredContent.data;
+    const daily = summary.daily as Record<string, unknown>[];
+    const quality = daily[0]?.["dataQuality"] as {
+      rollupTypesReturned: string[];
+      unavailableMetrics: {
+        metric: string;
+        reason: string;
+        httpStatus?: number;
+      }[];
+    };
+    expect(quality.rollupTypesReturned).toContain("distance");
+    expect(quality.rollupTypesReturned).not.toContain("steps");
+    expect(quality.unavailableMetrics).toContainEqual({
+      metric: "steps",
+      reason: "permission_denied",
+      httpStatus: 403,
+    });
   });
 });

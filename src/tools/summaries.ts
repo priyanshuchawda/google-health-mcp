@@ -471,6 +471,8 @@ export function buildDailySummary(input: DailySummaryInput): JsonRecord {
           : null,
       endTime:
         typeof interval["endTime"] === "string" ? interval["endTime"] : null,
+      civilStartTime: intervalCivilDateTime(interval, "start"),
+      civilEndTime: intervalCivilDateTime(interval, "end"),
       activeMinutes: duration === null ? null : Math.round(duration / 60),
       caloriesKcal: finiteNumber(metricsSummary["caloriesKcal"]),
       distanceMeters: millimeters === null ? null : millimeters / 1000,

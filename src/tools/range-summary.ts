@@ -5,8 +5,13 @@ import {
   getCapability,
 } from "../google-health/capabilities.js";
 import type { HealthApi } from "../google-health/client.js";
+import {
+  HealthApiError,
+  PaginationLimitError,
+} from "../google-health/errors.js";
 import { toolCatalog } from "./catalog.js";
 import { toolOutputSchema, toolResult } from "./results.js";
+import { mapWithConcurrency } from "./concurrency.js";
 import {
   buildDailySummary,
   civilDateFromValue,
@@ -31,7 +36,34 @@ interface LoadedRange {
   hrvByDate: Map<string, JsonRecord>;
   sleepByDate: Map<string, JsonRecord[]>;
   exerciseByDate: Map<string, JsonRecord[]>;
-  unavailableMetrics: { metric: string; reason: string }[];
+  unavailableMetrics: {
+    metric: string;
+    reason: string;
+    httpStatus?: number;
+  }[];
+}
+
+function requestFailure(error: unknown): {
+  reason: string;
+  httpStatus?: number;
+} {
+  if (error instanceof HealthApiError) {
+    if (error.status === 401 || error.status === 403)
+      return { reason: "permission_denied", httpStatus: error.status };
+    if (error.status === 429)
+      return { reason: "quota_exceeded", httpStatus: error.status };
+    if (error.status !== undefined && error.status >= 500)
+      return { reason: "temporary_upstream_error", httpStatus: error.status };
+    return {
+      reason: "upstream_rejected_request",
+      ...(error.status === undefined ? {} : { httpStatus: error.status }),
+    };
+  }
+  if (error instanceof PaginationLimitError)
+    return { reason: "pagination_limit_reached" };
+  if (error instanceof TypeError)
+    return { reason: "invalid_or_incomplete_response" };
+  return { reason: "request_failed" };
 }
 
 function addToMap<T>(map: Map<string, T[]>, key: string, value: T): void {
@@ -44,106 +76,110 @@ async function loadSummaryRange(
   api: HealthApi,
   start: string,
   endExclusive: string,
+  knownTimeZone?: string | null,
 ): Promise<LoadedRange> {
   datesInRange(start, endExclusive);
   const unavailableMetrics: { metric: string; reason: string }[] = [];
-  let timeZone: string | null = null;
-  try {
-    const settings = await api.request<JsonRecord>({
-      methodId: "health.users.getSettings",
-      pathParams: { name: "users/me/settings" },
-    });
-    const candidate = settings["timeZone"];
-    if (typeof candidate === "string") {
-      try {
-        new Intl.DateTimeFormat("en", { timeZone: candidate });
-        timeZone = candidate;
-      } catch {
+  let timeZone: string | null = knownTimeZone ?? null;
+  if (knownTimeZone === undefined) {
+    try {
+      const settings = await api.request<JsonRecord>({
+        methodId: "health.users.getSettings",
+        pathParams: { name: "users/me/settings" },
+      });
+      const candidate = settings["timeZone"];
+      if (typeof candidate === "string") {
+        try {
+          new Intl.DateTimeFormat("en", { timeZone: candidate });
+          timeZone = candidate;
+        } catch {
+          unavailableMetrics.push({
+            metric: "accountTimeZone",
+            reason: "invalid_settings_value",
+          });
+        }
+      } else {
         unavailableMetrics.push({
           metric: "accountTimeZone",
-          reason: "invalid_settings_value",
+          reason: "missing_settings_value",
         });
       }
+    } catch (error) {
+      unavailableMetrics.push({
+        metric: "accountTimeZone",
+        ...requestFailure(error),
+      });
     }
-  } catch {
-    unavailableMetrics.push({
-      metric: "accountTimeZone",
-      reason: "request_failed",
-    });
   }
 
   // API discovery caps four daily rollups at 14 days; split those requests while
   // keeping one request per wider-range metric whenever the 90-day cap permits.
   const dailyRollups = new Map<string, Map<string, JsonRecord[]>>();
-  await Promise.all(
-    ROLLUP_TYPES.map(async (dataType) => {
-      const capability = getCapability(dataType);
-      if (!capability?.operations.includes("dailyRollUp")) return;
-      assertOperationAllowed(dataType, "dailyRollUp");
-      const maximumWindow = [
-        "calories-in-heart-rate-zone",
-        "heart-rate",
-        "active-minutes",
-        "total-calories",
-      ].includes(dataType)
-        ? 14
-        : 90;
-      const byDate = new Map<string, JsonRecord[]>();
-      try {
-        let windowStart = start;
-        while (windowStart < endExclusive) {
-          let windowEnd = windowStart;
-          for (
-            let index = 0;
-            index < maximumWindow && windowEnd < endExclusive;
-            index += 1
-          )
-            windowEnd = nextCivilDate(windowEnd);
-          const windowDays = daysBetween(windowStart, windowEnd);
-          let pageToken: string | undefined;
-          for (let page = 0; page < 3; page += 1) {
-            const result = await api.request<JsonRecord>({
-              methodId: "health.users.dataTypes.dataPoints.dailyRollUp",
-              pathParams: { parent: `users/me/dataTypes/${dataType}` },
-              body: {
-                range: {
-                  start: { date: dateObject(windowStart) },
-                  end: { date: dateObject(windowEnd) },
-                },
-                windowSizeDays: 1,
-                pageSize: windowDays,
-                ...(pageToken ? { pageToken } : {}),
+  // Bound bursts while retaining the independent, on-demand requests.
+  await mapWithConcurrency(ROLLUP_TYPES, 4, async (dataType) => {
+    const capability = getCapability(dataType);
+    if (!capability?.operations.includes("dailyRollUp")) return;
+    assertOperationAllowed(dataType, "dailyRollUp");
+    const maximumWindow = [
+      "calories-in-heart-rate-zone",
+      "heart-rate",
+      "active-minutes",
+      "total-calories",
+    ].includes(dataType)
+      ? 14
+      : 90;
+    const byDate = new Map<string, JsonRecord[]>();
+    try {
+      let windowStart = start;
+      while (windowStart < endExclusive) {
+        let windowEnd = windowStart;
+        for (
+          let index = 0;
+          index < maximumWindow && windowEnd < endExclusive;
+          index += 1
+        )
+          windowEnd = nextCivilDate(windowEnd);
+        const windowDays = daysBetween(windowStart, windowEnd);
+        let pageToken: string | undefined;
+        for (let page = 0; page < 3; page += 1) {
+          const result = await api.request<JsonRecord>({
+            methodId: "health.users.dataTypes.dataPoints.dailyRollUp",
+            pathParams: { parent: `users/me/dataTypes/${dataType}` },
+            body: {
+              range: {
+                start: { date: dateObject(windowStart) },
+                end: { date: dateObject(windowEnd) },
               },
-            });
-            const points = result["rollupDataPoints"];
-            if (points !== undefined && !Array.isArray(points))
-              throw new TypeError("Missing daily rollup points.");
-            for (const value of Array.isArray(points) ? points : []) {
-              const point = object(value);
-              const date = civilDateFromValue(
-                object(point["civilStartTime"])["date"],
-              );
-              if (date && date >= start && date < endExclusive)
-                addToMap(byDate, date, point);
-            }
-            const token = result["nextPageToken"];
-            pageToken = typeof token === "string" && token ? token : undefined;
-            if (!pageToken) break;
-            if (page === 2)
-              throw new TypeError("Daily rollup page limit reached.");
+              windowSizeDays: 1,
+              pageSize: windowDays,
+              ...(pageToken ? { pageToken } : {}),
+            },
+          });
+          const points = result["rollupDataPoints"];
+          if (points !== undefined && !Array.isArray(points))
+            throw new TypeError("Missing daily rollup points.");
+          for (const value of Array.isArray(points) ? points : []) {
+            const point = object(value);
+            const date = civilDateFromValue(
+              object(point["civilStartTime"])["date"],
+            );
+            if (date && date >= start && date < endExclusive)
+              addToMap(byDate, date, point);
           }
-          windowStart = windowEnd;
+          const token = result["nextPageToken"];
+          pageToken = typeof token === "string" && token ? token : undefined;
+          if (!pageToken) break;
+          if (page === 2)
+            throw new TypeError("Daily rollup page limit reached.");
         }
-        dailyRollups.set(dataType, byDate);
-      } catch {
-        unavailableMetrics.push({
-          metric: dataType,
-          reason: "request_failed_or_incomplete",
-        });
-        dailyRollups.delete(dataType);
+        windowStart = windowEnd;
       }
-    }),
-  );
+      dailyRollups.set(dataType, byDate);
+    } catch (error) {
+      unavailableMetrics.push({ metric: dataType, ...requestFailure(error) });
+      dailyRollups.delete(dataType);
+    }
+  });
 
   const [restingResult, hrvResult, sleepResult, exerciseResult] =
     await Promise.allSettled([
@@ -165,7 +201,7 @@ async function loadSummaryRange(
     if (result.status === "fulfilled") return result.value;
     unavailableMetrics.push({
       metric: metricName,
-      reason: "request_failed_or_incomplete",
+      ...requestFailure(result.reason),
     });
     return fallback;
   };
@@ -241,6 +277,8 @@ function summaryRows(
     return {
       date,
       metrics: summary["metrics"],
+      sleepSessions: summary["sleepSessions"],
+      exerciseSessions: summary["exerciseSessions"],
       dataQuality: summary["dataQuality"],
     };
   });
@@ -433,12 +471,18 @@ export async function getHealthSummaryForRange(
   api: HealthApi,
   startDate: string,
   endDate: string,
+  options?: { timeZone: string | null },
 ): Promise<JsonRecord> {
   dateParts(startDate);
   dateParts(endDate);
   const endExclusive = nextCivilDate(endDate);
   const dates = datesInRange(startDate, endExclusive);
-  const loaded = await loadSummaryRange(api, startDate, endExclusive);
+  const loaded = await loadSummaryRange(
+    api,
+    startDate,
+    endExclusive,
+    options?.timeZone,
+  );
   const summary = buildRangeSummary(
     startDate,
     endDate,

@@ -48,7 +48,7 @@ The Google data type catalog does not expose native step or sleep goals through 
 
 See the complete [data type and supported operation list](docs/data-types.md).
 
-The catalog contains **44 record data types**. Basal energy burned is described inconsistently across Google's calories guide and migration material: it appears as a rollup/schema value, while the current data-type catalog and our reviewed capability snapshot do not list it as a standalone supported record type. Personal-range HRV and resting-heart-rate values are documented as daily rollup output fields, not independent record types in this catalog. We therefore do not expose either as a standalone record type. We also do not expose native step/sleep goals; the reviewed user API does not document a supported goal-management method. Custom goals are not stored by this MCP.
+The catalog contains **44 record data types**. Basal energy burned is described inconsistently across Google's calories guide and migration material: it appears as a rollup/schema value, while the current data-type catalog and our reviewed capability snapshot do not list it as a standalone supported record type. Personal-range HRV and resting-heart-rate values are documented as daily rollup output fields, not independent record types in this catalog. We therefore do not expose either as a standalone record type. We also do not expose native step/sleep goals; the reviewed user API does not document a supported goal-management method. Optional custom targets are stored as account-isolated MCP dashboard preferences.
 
 Read the [architecture notes](docs/architecture.md) for the local/remote authorization split and request lifecycle.
 
@@ -224,6 +224,8 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
+npx playwright install chromium
+npm run test:browser
 npm run worker:dry-run
 npm run smoke:package
 ```

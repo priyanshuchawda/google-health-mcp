@@ -106,13 +106,19 @@ export function registerHealthDashboardTool(
           timeZone = settings["timeZone"];
         }
       } catch {
-        // Summary still works with source-civil dates if settings are unavailable.
+        throw new Error(
+          "Google Health account time zone is unavailable. Confirm settings read permission, then reopen the dashboard.",
+        );
       }
-      const today = dateInTimeZone(new Date(), timeZone ?? "UTC");
+      if (!timeZone)
+        throw new Error(
+          "Google Health did not return an account time zone. Reopen the dashboard after settings are available.",
+        );
+      const today = dateInTimeZone(new Date(), timeZone);
       const endDate = subtractDays(nextCivilDate(today), 1);
       const startDate = subtractDays(endDate, 6);
       return toolResult(
-        await getHealthSummaryForRange(api, startDate, endDate),
+        await getHealthSummaryForRange(api, startDate, endDate, { timeZone }),
       );
     },
   );
