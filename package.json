@@ -53,15 +53,20 @@
     "auth": "tsx src/cli.ts auth",
     "serve": "tsx src/stdio.ts",
     "doctor": "tsx src/cli.ts doctor",
+    "build:dashboard": "node scripts/build-dashboard.mjs",
     "smoke:package": "node scripts/package-smoke.mjs",
+    "pretest": "node scripts/build-dashboard.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "pretypecheck": "node scripts/build-dashboard.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "prebuild": "node scripts/build-dashboard.mjs",
     "build": "tsc -p tsconfig.build.json",
     "worker:dev": "wrangler dev",
+    "preworker:dry-run": "node scripts/build-dashboard.mjs",
     "worker:dry-run": "wrangler deploy --dry-run",
     "spec:update": "tsx scripts/update-spec.ts",
     "docs:data-types": "tsx scripts/render-data-types.ts",
@@ -69,7 +74,9 @@
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "1.4.0",
+    "@modelcontextprotocol/ext-apps": "^1.7.5",
     "@modelcontextprotocol/server": "2.4.0",
+    "@openai/mcp-extensions": "^0.2.1",
     "google-auth-library": "^11.3.4",
     "zod": "4.6.7"
   },
@@ -78,6 +85,7 @@
     "@eslint/js": "10.0.1",
     "@modelcontextprotocol/client": "^2.4.0",
     "@types/node": "26.6.11",
+    "esbuild": "^0.28.2",
     "eslint": "10.15.0",
     "prettier": "3.10.1",
     "tsx": "4.20.6",
@@ -85,5 +93,10 @@
     "typescript-eslint": "^8.74.0",
     "vitest": "5.1.2",
     "wrangler": "4.168.0"
+  },
+  "overrides": {
+    "@openai/mcp-extensions": {
+      "zod": "4.6.7"
+    }
   }
 }

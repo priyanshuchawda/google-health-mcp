@@ -176,7 +176,7 @@ export function registerWorkoutTool(server: McpServer, api: HealthApi): void {
       const result = await api.request<Record<string, unknown>>({
         methodId: "health.users.dataTypes.dataPoints.create",
         pathParams: { parent: "users/me/dataTypes/exercise" },
-        body: { exercise },
+        body: { dataSource: { recordingMethod: "MANUAL" }, exercise },
       });
       return toolResult(writeOperationResult(result));
     },

@@ -94,14 +94,31 @@ describe("Google Health data freshness tool", () => {
   });
 
   it("reports daily measurements as civil dates rather than invented midnight timestamps", async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+    const today = `${parts.find((part) => part.type === "year")?.value}-${parts.find((part) => part.type === "month")?.value}-${parts.find((part) => part.type === "day")?.value}`;
     const [year, month, day] = today.split("-").map(Number);
-    const request = vi.fn(async () => ({
-      dataPoints: [{ steps: { date: { year, month, day }, count: "0" } }],
-    }));
+    const request = vi.fn(async (input: { methodId: string }) =>
+      input.methodId === "health.users.getSettings"
+        ? { timeZone: "Asia/Kolkata" }
+        : {
+            dataPoints: [
+              {
+                dailyRestingHeartRate: {
+                  date: { year, month, day },
+                  beatsPerMinute: "60",
+                },
+              },
+            ],
+          },
+    );
     const handler = captureFreshness({ request });
     const response = (await handler({
-      dataTypes: ["steps"],
+      dataTypes: ["daily-resting-heart-rate"],
       lookbackDays: 7,
     } as never)) as {
       structuredContent: { data: { dataTypes: Record<string, unknown>[] } };
@@ -115,5 +132,44 @@ describe("Google Health data freshness tool", () => {
     expect(response.structuredContent.data.dataTypes[0]).not.toHaveProperty(
       "ageHours",
     );
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats an omitted collection as an empty successful result and queries exercise through today's local date", async () => {
+    const requests: { methodId: string; query?: { filter?: string } }[] = [];
+    const request = vi.fn(async (input: (typeof requests)[number]) => {
+      requests.push(input);
+      if (input.methodId === "health.users.getSettings")
+        return { timeZone: "Asia/Kolkata" };
+      return {};
+    });
+    const handler = captureFreshness({ request });
+    const response = (await handler({
+      dataTypes: ["exercise"],
+      lookbackDays: 7,
+    } as never)) as {
+      structuredContent: { data: { dataTypes: Record<string, unknown>[] } };
+    };
+    expect(response.structuredContent.data.dataTypes[0]).toMatchObject({
+      status: "no_record_in_lookback",
+      newestReturnedRecord: null,
+    });
+    const filter = requests[1]?.query?.filter ?? "";
+    expect(filter).toMatch(/civil_start_time >= "\d{4}-\d{2}-\d{2}T00:00:00"/);
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+    const today = `${parts.find((part) => part.type === "year")?.value}-${parts.find((part) => part.type === "month")?.value}-${parts.find((part) => part.type === "day")?.value}`;
+    expect(filter).toContain(`civil_start_time < "${nextDay(today)}T00:00:00"`);
+    expect(request).toHaveBeenCalledTimes(2);
   });
 });
+
+function nextDay(value: string): string {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}

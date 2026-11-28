@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Google Health</title>
+    <style>
+      __APP_CSS__
+    </style>
+    <style>
+      body {
+        margin: 0;
+        padding: 18px;
+        font:
+          14px/1.45 system-ui,
+          sans-serif;
+        background: var(--background);
+        color: var(--foreground);
+      }
+      .app {
+        max-width: 980px;
+        margin: auto;
+      }
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      h1 {
+        margin: 0;
+        font-size: 24px;
+      }
+      h2 {
+        font-size: 16px;
+        margin: 0 0 12px;
+      }
+      .muted {
+        color: var(--muted-foreground);
+      }
+      nav {
+        display: flex;
+        gap: 8px;
+        margin: 18px 0;
+        flex-wrap: wrap;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 12px;
+      }
+      .card {
+        border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
+        border-radius: 14px;
+        padding: 16px;
+        background: var(--card);
+      }
+      .value {
+        font-size: 26px;
+        font-weight: 650;
+        margin-top: 5px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 9px 0;
+      }
+      .bar {
+        height: 8px;
+        border-radius: 99px;
+        background: var(--primary);
+        min-width: 2px;
+      }
+      form {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px;
+        align-items: end;
+      }
+      label {
+        display: grid;
+        gap: 5px;
+        font-size: 13px;
+      }
+      input,
+      select {
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .status {
+        min-height: 24px;
+        margin: 12px 0;
+      }
+      .sessions {
+        display: grid;
+        gap: 8px;
+      }
+      @media (max-width: 480px) {
+        body {
+          padding: 12px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main id="app" class="app" aria-live="polite">
+      <header>
+        <div>
+          <h1>Google Health</h1>
+          <div id="range-label" class="muted">
+            Loading your authorized health summary…
+          </div>
+        </div>
+        <button id="refresh" type="button">Refresh</button>
+      </header>
+      <nav id="tabs" aria-label="Dashboard sections"></nav>
+      <div id="status" class="status muted" role="status"></div>
+      <section id="view"></section>
+    </main>
+    <script>
+      __APP_JS__;
+    </script>
+  </body>
+</html>

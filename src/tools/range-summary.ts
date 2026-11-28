@@ -17,6 +17,7 @@ import {
   fetchBoundedSessions,
   fetchDailyRecords,
   finiteNumber,
+  intervalCivilDateTime,
   nextCivilDate,
   object,
   ROLLUP_TYPES,
@@ -115,9 +116,9 @@ async function loadSummaryRange(
               },
             });
             const points = result["rollupDataPoints"];
-            if (!Array.isArray(points))
+            if (points !== undefined && !Array.isArray(points))
               throw new TypeError("Missing daily rollup points.");
-            for (const value of points) {
+            for (const value of Array.isArray(points) ? points : []) {
               const point = object(value);
               const date = civilDateFromValue(
                 object(point["civilStartTime"])["date"],
@@ -183,17 +184,15 @@ async function loadSummaryRange(
   const exerciseRecords = capture<JsonRecord[]>(exerciseResult, "exercise", []);
   const sleepByDate = new Map<string, JsonRecord[]>();
   for (const point of sleepRecords) {
-    const date = civilDateFromValue(
-      object(object(point["sleep"])["interval"])["civilEndTime"],
-    );
+    const interval = object(object(point["sleep"])["interval"]);
+    const date = civilDateFromValue(intervalCivilDateTime(interval, "end"));
     if (date && date >= start && date < endExclusive)
       addToMap(sleepByDate, date, point);
   }
   const exerciseByDate = new Map<string, JsonRecord[]>();
   for (const point of exerciseRecords) {
-    const date = civilDateFromValue(
-      object(object(point["exercise"])["interval"])["civilStartTime"],
-    );
+    const interval = object(object(point["exercise"])["interval"]);
+    const date = civilDateFromValue(intervalCivilDateTime(interval, "start"));
     if (date && date >= start && date < endExclusive)
       addToMap(exerciseByDate, date, point);
   }
@@ -430,6 +429,25 @@ export function buildRangeSummary(
   };
 }
 
+export async function getHealthSummaryForRange(
+  api: HealthApi,
+  startDate: string,
+  endDate: string,
+): Promise<JsonRecord> {
+  dateParts(startDate);
+  dateParts(endDate);
+  const endExclusive = nextCivilDate(endDate);
+  const dates = datesInRange(startDate, endExclusive);
+  const loaded = await loadSummaryRange(api, startDate, endExclusive);
+  const summary = buildRangeSummary(
+    startDate,
+    endDate,
+    summaryRows(dates, loaded),
+  );
+  object(summary["dateRange"])["timeZone"] = loaded.timeZone;
+  return summary;
+}
+
 export function registerRangeSummaryTool(
   server: McpServer,
   api: HealthApi,
@@ -458,15 +476,9 @@ export function registerRangeSummaryTool(
       outputSchema: toolOutputSchema,
     },
     async ({ startDate, endDate }) => {
-      dateParts(startDate);
-      dateParts(endDate);
-      const endExclusive = nextCivilDate(endDate);
-      const dates = datesInRange(startDate, endExclusive);
-      const loaded = await loadSummaryRange(api, startDate, endExclusive);
-      const rows = summaryRows(dates, loaded);
-      const summary = buildRangeSummary(startDate, endDate, rows);
-      object(summary["dateRange"])["timeZone"] = loaded.timeZone;
-      return toolResult(summary);
+      return toolResult(
+        await getHealthSummaryForRange(api, startDate, endDate),
+      );
     },
   );
 }

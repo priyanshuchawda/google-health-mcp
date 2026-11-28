@@ -109,4 +109,82 @@ describe("date-range health summary MCP handler", () => {
     ).rejects.toThrow(/1 to 31/);
     expect(request).not.toHaveBeenCalled();
   });
+
+  it("groups timestamp-only sleep and workouts by their recorded UTC offsets and accepts empty rollups", async () => {
+    const requests: {
+      methodId: string;
+      pathParams?: Record<string, string>;
+      query?: Record<string, unknown>;
+    }[] = [];
+    const request = vi.fn(async (input: (typeof requests)[number]) => {
+      requests.push(input);
+      if (input.methodId === "health.users.getSettings")
+        return { timeZone: "Asia/Kolkata" };
+      if (input.methodId.endsWith(".dailyRollUp")) {
+        if (input.pathParams?.parent.endsWith("/hydration-log")) return {};
+        return { rollupDataPoints: [] };
+      }
+      if (input.methodId.endsWith(".list")) return {};
+      if (input.methodId.endsWith(".reconcile")) {
+        if (input.pathParams?.parent.endsWith("/sleep"))
+          return {
+            dataPoints: [
+              {
+                sleep: {
+                  interval: {
+                    startTime: "2026-11-22T21:37:00Z",
+                    startUtcOffset: "19800s",
+                    endTime: "2026-11-23T04:00:00Z",
+                    endUtcOffset: "19800s",
+                  },
+                  summary: { minutesAsleep: 383 },
+                  metadata: { mainSleep: true },
+                },
+              },
+            ],
+          };
+        if (input.pathParams?.parent.endsWith("/exercise"))
+          return {
+            dataPoints: [
+              {
+                exercise: {
+                  interval: {
+                    startTime: "2026-11-24T05:38:00Z",
+                    startUtcOffset: "19800s",
+                    endTime: "2026-11-24T06:08:00Z",
+                    endUtcOffset: "19800s",
+                  },
+                  activeDuration: "1800s",
+                },
+              },
+            ],
+          };
+      }
+      throw new Error(`Unexpected method ${input.methodId}`);
+    });
+    const handler = captureRangeSummary({ request });
+    const response = (await handler({
+      startDate: "2026-11-23",
+      endDate: "2026-11-24",
+    } as never)) as { structuredContent: { data: Record<string, unknown> } };
+    const summary = response.structuredContent.data;
+    const daily = summary.daily as Record<string, unknown>[];
+    const firstMetrics = daily[0]?.["metrics"] as Record<string, unknown>;
+    const secondMetrics = daily[1]?.["metrics"] as Record<string, unknown>;
+    expect(firstMetrics["sleepMinutesAsleep"]).toBe(383);
+    expect(secondMetrics["exerciseCount"]).toBe(1);
+    expect(secondMetrics["exerciseMinutes"]).toMatchObject({
+      value: 30,
+      unit: "min",
+    });
+    expect(
+      (summary.dataCompleteness as Record<string, { daysReported: number }>)[
+        "hydration"
+      ]?.daysReported,
+    ).toBe(0);
+    expect(
+      requests.find((item) => item.pathParams?.parent?.endsWith("/exercise"))
+        ?.query?.filter,
+    ).toContain('"2026-11-23T00:00:00"');
+  });
 });

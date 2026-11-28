@@ -3,6 +3,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/client";
 import { describe, expect, it, vi } from "vitest";
 import { InsufficientHealthPermissionError } from "../../src/auth/permission-errors.js";
 import { createHealthMcpServer } from "../../src/server.js";
+import type { HealthPreferences } from "../../src/tools/registry.js";
 
 describe("remote OAuth metadata over MCP", () => {
   it("lists per-tool scopes and returns step-up auth metadata for a denied write", async () => {
@@ -67,6 +68,64 @@ describe("remote OAuth metadata over MCP", () => {
         ]),
       );
       expect(JSON.stringify(result)).toContain("settings.writeonly");
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("registers the dashboard and account preference tools with safe scopes", async () => {
+    let stored: HealthPreferences = {
+      dailyStepsGoal: 8000,
+      sleepHoursGoal: 8,
+      hydrationMlGoal: 2500,
+      weeklyExerciseMinutesGoal: 150,
+    };
+    const server = createHealthMcpServer(
+      {
+        tokenProvider: { getAccessToken: vi.fn(async () => "unused-token") },
+        fetchImpl: vi.fn(),
+      },
+      {
+        remoteAuthorization: {
+          mcpScopes: ["mcp:read", "mcp:write"],
+          googleHealthScopes: [],
+          resourceMetadataUrl:
+            "https://health.example/.well-known/oauth-protected-resource/mcp",
+        },
+        preferences: {
+          read: async () => stored,
+          update: async (set) => (stored = { ...stored, ...set }),
+        },
+      },
+    );
+    const client = new Client({ name: "dashboard-test", version: "1.0.0" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      const { tools } = await client.listTools();
+      const dashboard = tools.find(
+        (tool) => tool.name === "open_health_dashboard",
+      );
+      expect(dashboard?._meta?.["openai/ui"]).toBeDefined();
+      expect(dashboard?._meta?.["securitySchemes"]).toMatchObject([
+        { type: "oauth2", scopes: ["mcp:read"] },
+      ]);
+      expect(
+        tools.find((tool) => tool.name === "settings.update")?._meta,
+      ).toMatchObject({
+        securitySchemes: [
+          { type: "oauth2", scopes: ["mcp:read", "mcp:write"] },
+        ],
+      });
+      const updated = await client.callTool({
+        name: "settings.update",
+        arguments: { set: { dailyStepsGoal: 9000 } },
+      });
+      expect(updated.isError, JSON.stringify(updated)).not.toBe(true);
+      expect(stored.dailyStepsGoal).toBe(9000);
     } finally {
       await client.close();
       await server.close();

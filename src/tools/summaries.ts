@@ -111,6 +111,79 @@ export function civilDateFromValue(value: unknown): string | null {
   }
 }
 
+function utcOffsetSeconds(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+  const match = value.match(/^([+-]?\d+(?:\.\d+)?)s?$/);
+  if (!match) return null;
+  const seconds = Number(match[1]);
+  return Number.isFinite(seconds) ? seconds : null;
+}
+
+/** Resolve a recorded civil datetime, falling back to the timestamp's stored UTC offset. */
+export function civilDateTimeParts(
+  civilValue: unknown,
+  physicalTime?: unknown,
+  recordedUtcOffset?: unknown,
+): JsonRecord | null {
+  const civil = object(civilValue);
+  const explicitDate = civilDateFromValue(civil["date"]);
+  const explicitTime = object(civil["time"]);
+  const explicitHour = finiteNumber(explicitTime["hours"]);
+  const explicitMinute = finiteNumber(explicitTime["minutes"]);
+  const explicitSecond = finiteNumber(explicitTime["seconds"]) ?? 0;
+  if (
+    explicitDate &&
+    explicitHour !== null &&
+    explicitMinute !== null &&
+    explicitHour >= 0 &&
+    explicitHour <= 23 &&
+    explicitMinute >= 0 &&
+    explicitMinute <= 59 &&
+    explicitSecond >= 0 &&
+    explicitSecond < 60
+  ) {
+    return {
+      date: object(civil["date"]),
+      time: {
+        hours: explicitHour,
+        minutes: explicitMinute,
+        seconds: explicitSecond,
+      },
+    };
+  }
+
+  if (typeof physicalTime !== "string") return null;
+  const timestamp = Date.parse(physicalTime);
+  const offset = utcOffsetSeconds(recordedUtcOffset);
+  if (!Number.isFinite(timestamp) || offset === null) return null;
+  const local = new Date(timestamp + offset * 1000);
+  return {
+    date: {
+      year: local.getUTCFullYear(),
+      month: local.getUTCMonth() + 1,
+      day: local.getUTCDate(),
+    },
+    time: {
+      hours: local.getUTCHours(),
+      minutes: local.getUTCMinutes(),
+      seconds: local.getUTCSeconds(),
+    },
+  };
+}
+
+export function intervalCivilDateTime(
+  interval: JsonRecord,
+  edge: "start" | "end",
+): JsonRecord | null {
+  const name = edge === "start" ? "Start" : "End";
+  return civilDateTimeParts(
+    interval[`civil${name}Time`],
+    interval[`${edge}Time`],
+    interval[`${edge}UtcOffset`],
+  );
+}
+
 export function dateObject(date: string): JsonRecord {
   return dateParts(date);
 }
@@ -273,8 +346,8 @@ export function buildDailySummary(input: DailySummaryInput): JsonRecord {
             : null,
         endTime:
           typeof interval["endTime"] === "string" ? interval["endTime"] : null,
-        civilStartTime: interval["civilStartTime"] ?? null,
-        civilEndTime: interval["civilEndTime"] ?? null,
+        civilStartTime: intervalCivilDateTime(interval, "start"),
+        civilEndTime: intervalCivilDateTime(interval, "end"),
         minutesAsleep: finiteNumber(summary["minutesAsleep"]),
         minutesInSleepPeriod: finiteNumber(summary["minutesInSleepPeriod"]),
         mainSleep:
@@ -585,7 +658,7 @@ export function registerSummaryTool(server: McpServer, api: HealthApi): void {
         });
       } else {
         assertOperationAllowed("sleep", "reconcile");
-        const sleepFilter = `sleep.interval.civil_end_time >= "${date}" AND sleep.interval.civil_end_time < "${nextCivilDate(date)}"`;
+        const sleepFilter = `sleep.interval.civil_end_time >= "${date}T00:00:00" AND sleep.interval.civil_end_time < "${nextCivilDate(date)}T00:00:00"`;
         let pageToken: string | undefined;
         try {
           for (let page = 0; page < 10; page += 1) {
@@ -599,9 +672,10 @@ export function registerSummaryTool(server: McpServer, api: HealthApi): void {
               },
             });
             const pagePoints = result["dataPoints"];
-            if (!Array.isArray(pagePoints))
+            if (pagePoints !== undefined && !Array.isArray(pagePoints))
               throw new TypeError("Missing sleep session records.");
-            sleepPoints.push(...pagePoints.map(object));
+            if (Array.isArray(pagePoints))
+              sleepPoints.push(...pagePoints.map(object));
             const nextPageToken = result["nextPageToken"];
             pageToken =
               typeof nextPageToken === "string" && nextPageToken
@@ -701,20 +775,34 @@ export async function fetchDailyRecords(
 ): Promise<Map<string, JsonRecord>> {
   assertOperationAllowed(dataType, "list");
   const capability = getCapability(dataType)!;
-  const result = await api.request<JsonRecord>({
-    methodId: "health.users.dataTypes.dataPoints.list",
-    apiVersion: defaultApiVersionForDataType(dataType),
-    pathParams: { parent: `users/me/dataTypes/${dataType}` },
-    query: {
-      filter: `${capability.filterParameter}.date >= "${start}" AND ${capability.filterParameter}.date < "${endExclusive}"`,
-      pageSize: 90,
-    },
-  });
   const field =
     dataType === "daily-resting-heart-rate"
       ? "dailyRestingHeartRate"
       : "dailyHeartRateVariability";
-  return dateMapFromPoints(result["dataPoints"], field);
+  const records: JsonRecord[] = [];
+  let pageToken: string | undefined;
+  for (let page = 0; page < 3; page += 1) {
+    const result = await api.request<JsonRecord>({
+      methodId: "health.users.dataTypes.dataPoints.list",
+      apiVersion: defaultApiVersionForDataType(dataType),
+      pathParams: { parent: `users/me/dataTypes/${dataType}` },
+      query: {
+        filter: `${capability.filterParameter}.date >= "${start}" AND ${capability.filterParameter}.date < "${endExclusive}"`,
+        pageSize: 90,
+        ...(pageToken ? { pageToken } : {}),
+      },
+    });
+    const points = result["dataPoints"];
+    if (points !== undefined && !Array.isArray(points))
+      throw new TypeError(`Missing ${dataType} records in API response.`);
+    if (Array.isArray(points)) records.push(...points.map(object));
+    const next = result["nextPageToken"];
+    pageToken = typeof next === "string" && next ? next : undefined;
+    if (!pageToken) break;
+    if (page === 2)
+      throw new TypeError(`${dataType} measurement page limit reached.`);
+  }
+  return dateMapFromPoints(records, field);
 }
 
 export async function fetchBoundedSessions(
@@ -725,7 +813,7 @@ export async function fetchBoundedSessions(
 ): Promise<JsonRecord[]> {
   assertOperationAllowed(dataType, "reconcile");
   const field = dataType === "sleep" ? "civil_end_time" : "civil_start_time";
-  const filter = `${dataType}.interval.${field} >= "${start}" AND ${dataType}.interval.${field} < "${endExclusive}"`;
+  const filter = `${dataType}.interval.${field} >= "${start}T00:00:00" AND ${dataType}.interval.${field} < "${endExclusive}T00:00:00"`;
   const records: JsonRecord[] = [];
   let pageToken: string | undefined;
   // Session endpoints cap pages at 25; this keeps a summary bounded to 250 sessions.
@@ -736,9 +824,9 @@ export async function fetchBoundedSessions(
       query: { filter, pageSize: 25, ...(pageToken ? { pageToken } : {}) },
     });
     const points = result["dataPoints"];
-    if (!Array.isArray(points))
+    if (points !== undefined && !Array.isArray(points))
       throw new TypeError(`Missing ${dataType} records in API response.`);
-    records.push(...points.map(object));
+    if (Array.isArray(points)) records.push(...points.map(object));
     const next = result["nextPageToken"];
     pageToken = typeof next === "string" && next ? next : undefined;
     if (!pageToken) return records;

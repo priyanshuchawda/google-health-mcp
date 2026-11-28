@@ -70,15 +70,35 @@ export function registerDataFreshnessTool(
       const selected = dataTypes ?? [...FRESHNESS_DEFAULT_TYPES];
       const end = new Date();
       const start = new Date(end.getTime() - lookbackDays * 86_400_000);
-      const asDate = (date: Date) => date.toISOString().slice(0, 10);
-      const today = asDate(end);
-      const dailyStart = new Date(
-        Date.UTC(
-          end.getUTCFullYear(),
-          end.getUTCMonth(),
-          end.getUTCDate() - lookbackDays + 1,
-        ),
-      );
+      const physicalStart = `${start.toISOString().slice(0, 19)}Z`;
+      const physicalEnd = `${end.toISOString().slice(0, 19)}Z`;
+      let accountTimeZone: string | null = null;
+      let todayCivil: string | null = null;
+      if (
+        selected.some((type) =>
+          ["Daily", "Session"].includes(getCapability(type)?.kind ?? ""),
+        )
+      ) {
+        try {
+          const settings = await api.request<JsonRecord>({
+            methodId: "health.users.getSettings",
+            pathParams: { name: "users/me/settings" },
+          });
+          const candidate = settings["timeZone"];
+          if (typeof candidate === "string") {
+            new Intl.DateTimeFormat("en", { timeZone: candidate });
+            accountTimeZone = candidate;
+            todayCivil = civilDateInTimeZone(end, candidate);
+          }
+        } catch {
+          // Do not silently use UTC when daily-query boundaries need local dates.
+        }
+      }
+      const dailyStart =
+        todayCivil === null
+          ? null
+          : subtractCivilDays(todayCivil, lookbackDays - 1);
+      const dailyEnd = todayCivil === null ? null : nextCivilDate(todayCivil);
       const rows = await Promise.all(
         selected.map(async (dataType) => {
           const capability = getCapability(dataType);
@@ -94,15 +114,29 @@ export function registerDataFreshnessTool(
               status: "not_time_series_data",
               newestReturnedRecord: null,
             };
+          if (
+            ["Daily", "Session"].includes(capability.kind) &&
+            (dailyStart === null || dailyEnd === null)
+          )
+            return {
+              dataType,
+              status: "time_zone_unavailable",
+              lookbackDays,
+              newestReturnedRecord: null,
+            };
           try {
             const startBound =
               capability.kind === "Daily"
-                ? asDate(dailyStart)
-                : `${start.toISOString().slice(0, 19)}Z`;
+                ? dailyStart!
+                : capability.kind === "Session"
+                  ? (dailyStart ?? "")
+                  : physicalStart;
             const endBound =
               capability.kind === "Daily"
-                ? nextCivilDate(today)
-                : `${end.toISOString().slice(0, 19)}Z`;
+                ? dailyEnd!
+                : capability.kind === "Session"
+                  ? (dailyEnd ?? "")
+                  : physicalEnd;
             const points: JsonRecord[] = [];
             let pageToken: string | undefined;
             let paginationTruncated = false;
@@ -120,9 +154,13 @@ export function registerDataFreshnessTool(
                   ...(pageToken ? { pageToken } : {}),
                 },
               });
-              if (!Array.isArray(result["dataPoints"]))
-                throw new TypeError("The API page did not contain dataPoints.");
-              points.push(...result["dataPoints"].map(object));
+              const pagePoints = result["dataPoints"];
+              if (pagePoints !== undefined && !Array.isArray(pagePoints))
+                throw new TypeError(
+                  "The API page contained invalid dataPoints.",
+                );
+              if (Array.isArray(pagePoints))
+                points.push(...pagePoints.map(object));
               const next = result["nextPageToken"];
               pageToken = typeof next === "string" && next ? next : undefined;
               if (!pageToken) break;
@@ -151,9 +189,10 @@ export function registerDataFreshnessTool(
             const record = object(newest.point[slugField(dataType)]);
             const parsedTime = Date.parse(newest.timestamp);
             const isCivilDate = /^\d{4}-\d{2}-\d{2}$/.test(newest.timestamp);
-            const todayDate = asDate(new Date());
             const ageDays = isCivilDate
-              ? daysBetween(newest.timestamp, nextCivilDate(todayDate)) - 1
+              ? todayCivil === null
+                ? null
+                : daysBetween(newest.timestamp, nextCivilDate(todayCivil)) - 1
               : null;
             return {
               dataType,
@@ -188,8 +227,9 @@ export function registerDataFreshnessTool(
       );
       return toolResult({
         measurementTimeNote:
-          "This reports the newest timestamp found in a bounded API listing window. It is not a guaranteed upload/sync time; some data types have no update timestamp.",
+          "This reports the newest timestamp found in a bounded API listing window. It is not a guaranteed upload/sync time; some data types have no update timestamp. Daily dates use the account time zone when available; session query bounds use complete local civil datetimes.",
         lookbackDays,
+        accountTimeZone,
         dataTypes: rows,
       });
     },
@@ -212,8 +252,38 @@ function buildFreshnessFilter(
   if (capability.slug === "electrocardiogram")
     return `electrocardiogram.interval.start_time >= "${start}"`;
   if (capability.kind === "Session")
-    return `${capability.filterParameter}.interval.civil_start_time >= "${start.slice(0, 10)}" AND ${capability.filterParameter}.interval.civil_start_time < "${end.slice(0, 10)}"`;
+    return `${capability.filterParameter}.interval.civil_start_time >= "${start}T00:00:00" AND ${capability.filterParameter}.interval.civil_start_time < "${end}T00:00:00"`;
   throw new TypeError(
     `${capability.slug} does not support a bounded freshness query.`,
   );
+}
+
+function civilDateInTimeZone(value: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const part = (type: string) =>
+    parts.find((item) => item.type === type)?.value;
+  const year = part("year");
+  const month = part("month");
+  const day = part("day");
+  if (!year || !month || !day)
+    throw new TypeError("Could not determine the account-local calendar date.");
+  return `${year}-${month}-${day}`;
+}
+
+function subtractCivilDays(date: string, count: number): string {
+  let result = date;
+  for (let index = 0; index < count; index += 1)
+    result = previousCivilDate(result);
+  return result;
+}
+
+function previousCivilDate(date: string): string {
+  const [year, month, day] = date.split("-").map(Number);
+  const previous = new Date(Date.UTC(year!, month! - 1, day! - 1));
+  return `${previous.getUTCFullYear().toString().padStart(4, "0")}-${String(previous.getUTCMonth() + 1).padStart(2, "0")}-${String(previous.getUTCDate()).padStart(2, "0")}`;
 }

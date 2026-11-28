@@ -13,29 +13,36 @@ The public source repository contains no credentials or user health records. A p
 
 The checked-in capability snapshot contains all **44 Google Health data type entries** in the official catalog and endpoint metadata generated from the official v4 and v4beta discovery documents. The generic data tool respects each type's allowed operations; a type is not writable just because another type is.
 
-| Tool                           | Purpose                                                                                                |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `list_data_types`              | Discover documented data types, scopes, record kinds, filters, and allowed operations                  |
-| `describe_schema`              | Inspect official request parameters and payload schemas before reading or writing                      |
-| `get_daily_health_summary`     | Google's source-civil-date rollups and reconciled sleep; account time zone is context, not an override |
-| `get_health_summary`           | Per-day and period totals/averages/comparisons for an inclusive range of up to 31 dates                |
-| `get_data_freshness`           | Recent measurement timestamps and sources for a bounded set of types                                   |
-| `get_health_data`              | List, fetch, reconcile, or aggregate a documented health data type with pagination and date filters    |
-| `get_health_account_data`      | Read identity, profile, settings, paired devices, and IRN profile                                      |
-| `create_health_record`         | Create one supported record from user-supplied values                                                  |
-| `log_workout`                  | Create a validated exercise session with explicit-offset times and only supplied workout metrics       |
-| `update_health_record`         | Patch one supported, exact record                                                                      |
-| `delete_health_records`        | Delete exact record names after explicit confirmation in the tool input                                |
-| `update_health_account_data`   | Update supported profile or settings fields                                                            |
-| `export_exercise_tcx`          | Export a supported exercise route                                                                      |
-| `get_shared_health_link`       | Read a user-provided SMART Health Link                                                                 |
-| `list_webhook_configuration`   | Optional project-level webhook reads (local opt-in only)                                               |
-| `write_webhook_configuration`  | Optional project-level webhook writes (local opt-in only)                                              |
-| `delete_webhook_configuration` | Optional project-level webhook deletion (local opt-in only)                                            |
+| Tool                           | Purpose                                                                                                 |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `list_data_types`              | Discover documented data types, scopes, record kinds, filters, and allowed operations                   |
+| `describe_schema`              | Inspect official request parameters and payload schemas before reading or writing                       |
+| `get_daily_health_summary`     | Google's source-civil-date rollups and reconciled sleep; account time zone is context, not an override  |
+| `get_health_summary`           | Per-day and period totals/averages/comparisons for an inclusive range of up to 31 dates                 |
+| `get_data_freshness`           | Recent measurement timestamps and sources for a bounded set of types                                    |
+| `open_health_dashboard`        | Optional ChatGPT MCP App with summary charts, sleep/activity views, freshness, and confirmed quick logs |
+| `get_health_data`              | List, fetch, reconcile, or aggregate a documented health data type with pagination and date filters     |
+| `get_health_account_data`      | Read identity, profile, settings, paired devices, and IRN profile                                       |
+| `create_health_record`         | Create one supported record from user-supplied values                                                   |
+| `log_workout`                  | Create a validated exercise session with explicit-offset times and only supplied workout metrics        |
+| `update_health_record`         | Patch one supported, exact record                                                                       |
+| `delete_health_records`        | Delete exact record names after explicit confirmation in the tool input                                 |
+| `update_health_account_data`   | Update supported profile or settings fields                                                             |
+| `export_exercise_tcx`          | Export a supported exercise route                                                                       |
+| `get_shared_health_link`       | Read a user-provided SMART Health Link                                                                  |
+| `list_webhook_configuration`   | Optional project-level webhook reads (local opt-in only)                                                |
+| `write_webhook_configuration`  | Optional project-level webhook writes (local opt-in only)                                               |
+| `delete_webhook_configuration` | Optional project-level webhook deletion (local opt-in only)                                             |
 
 Daily and date-range summaries use Google's own rollups where available; raw overlapping sources are not blindly added. Date ranges support up to 31 civil dates. Google limits some daily rollups to 14 days, so those requests are split into bounded windows; the month summary stays below 50 Google API subrequests under normal responses. Missing data stays missing rather than being represented as zero. Sleep summaries distinguish actual sleep from time in bed, include available stages and primary sleep, and preserve incomplete data. Summaries include daily resting heart rate, HRV, exercise sessions, and source-civil bedtime/wake-time consistency where available. Results preserve API units and source civil dates.
 
 `get_data_freshness` inspects up to eight selected types over at most 30 days. It reports the newest measurement timestamp returned by the API and its source where available. That measurement time is not proof of when a device uploaded the record; the API does not expose an upload timestamp for every data type. `log_workout` validates a Google exercise enum and explicit-offset timestamps, and sends only metrics the user supplied. It does not fabricate raw steps or heart-rate samples.
+
+### Optional ChatGPT dashboard
+
+Clients that support MCP Apps can open `open_health_dashboard` from the sidebar or a conversation. It shows up to 31 source-civil dates, step history, sleep sessions and stages, activity, and bounded freshness results. The Log tab provides confirmation-protected manual forms for hydration, workouts, weight, sleep intervals, and nutrition. Sleep entries contain only the interval supplied; the app never invents sleep stages or actual sleep duration. Anonymous nutrition entries are not editable in Google Health. Existing text tools remain available when a client does not render MCP Apps.
+
+Dashboard preferences include optional step, sleep, hydration, and weekly exercise targets. They are MCP-managed settings, not native Google Health goals. A remote deployment stores only these small preference values in its existing KV namespace, keyed by the authorized Google subject; it does not cache health records or browser state. Settings updates require the MCP write grant. The UI fetches health data on demand and does not poll in the background.
 
 The Google data type catalog does not expose native step or sleep goals through this project's supported user API methods. This server does not invent or write those goals. Webhook administration requires the broad `cloud-platform` permission and is disabled by default.
 

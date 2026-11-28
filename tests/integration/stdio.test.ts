@@ -25,6 +25,25 @@ describe("Google Health MCP stdio protocol", () => {
       expect(tools.map((tool) => tool.name)).toContain("get_health_summary");
       expect(tools.map((tool) => tool.name)).toContain("get_data_freshness");
       expect(tools.map((tool) => tool.name)).toContain("log_workout");
+      const dashboard = tools.find(
+        (tool) => tool.name === "open_health_dashboard",
+      );
+      expect(dashboard?._meta?.["ui"]).toMatchObject({
+        resourceUri: "ui://ghealth/health-dashboard-v1",
+      });
+      expect(dashboard?._meta?.["openai/ui"]).toBeDefined();
+      const resources = await client.listResources();
+      expect(resources.resources.map((resource) => resource.uri)).toContain(
+        "ui://ghealth/health-dashboard-v1",
+      );
+      const dashboardResource = await client.readResource({
+        uri: "ui://ghealth/health-dashboard-v1",
+      });
+      expect(dashboardResource.contents[0]?.mimeType).toBe(
+        "text/html;profile=mcp-app",
+      );
+      expect(dashboardResource.contents[0]?.text).toContain("Google Health");
+      expect(dashboardResource.contents[0]?.text).toContain("hydration-form");
 
       const result = await client.callTool({
         name: "list_data_types",

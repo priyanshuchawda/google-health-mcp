@@ -46,12 +46,15 @@ describe("log_workout MCP handler", () => {
       "https://health.googleapis.com/v4/users/me/dataTypes/exercise/dataPoints",
     );
     const payload = JSON.parse(String(init?.body)) as {
+      dataSource: { recordingMethod: string };
       exercise: {
         interval: { startUtcOffset: string; endUtcOffset: string };
         activeDuration: string;
         metricsSummary: Record<string, unknown>;
       };
     };
+    expect(payload.dataSource).toEqual({ recordingMethod: "MANUAL" });
+    expect(payload.exercise.displayName).toBe("circuit training");
     expect(payload.exercise.interval).toMatchObject({
       startUtcOffset: "19800s",
       endUtcOffset: "19800s",
