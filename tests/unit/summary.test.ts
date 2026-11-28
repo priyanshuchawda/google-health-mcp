@@ -229,4 +229,93 @@ describe("daily Google Health summary", () => {
       endTime: "2026-11-26T06:00:00Z",
     });
   });
+
+  it("returns null for stage fallback when intervals overlap within a session", () => {
+    const summary = buildDailySummary({
+      date: "2026-11-26",
+      timeZone: "UTC",
+      rollups: {},
+      sleep: {
+        dataPoints: [
+          {
+            name: "sleep-with-overlapping-stages",
+            sleep: {
+              interval: {
+                startTime: "2026-11-25T22:00:00Z",
+                endTime: "2026-11-26T06:00:00Z",
+              },
+              stages: [
+                {
+                  type: "LIGHT",
+                  startTime: "2026-11-25T22:00:00Z",
+                  endTime: "2026-11-25T23:30:00Z",
+                },
+                {
+                  type: "DEEP",
+                  startTime: "2026-11-25T23:00:00Z",
+                  endTime: "2026-11-26T00:00:00Z",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    expect(summary.metrics.sleepStagesMinutes.deep).toBeNull();
+    expect(summary.metrics.sleepStagesMinutes.light).toBeNull();
+  });
+
+  it("does not infer primary sleep from a session explicitly marked not-main", () => {
+    const summary = buildDailySummary({
+      date: "2026-11-26",
+      timeZone: "UTC",
+      rollups: {},
+      sleep: {
+        dataPoints: [
+          {
+            name: "not-main",
+            sleep: {
+              interval: {
+                startTime: "2026-11-25T22:00:00Z",
+                endTime: "2026-11-26T06:00:00Z",
+              },
+              summary: { minutesAsleep: "420" },
+              metadata: { mainSleep: false, nap: false },
+            },
+          },
+        ],
+      },
+    });
+
+    expect(summary.metrics.primarySleep).toBeNull();
+  });
+
+  it("does not sum sleep durations when the session end precedes its start", () => {
+    const summary = buildDailySummary({
+      date: "2026-11-26",
+      timeZone: "UTC",
+      rollups: {},
+      sleep: {
+        dataPoints: [
+          {
+            name: "invalid-interval",
+            sleep: {
+              interval: {
+                startTime: "2026-11-26T06:00:00Z",
+                endTime: "2026-11-25T22:00:00Z",
+              },
+              summary: {
+                minutesAsleep: "420",
+                minutesInSleepPeriod: "480",
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    expect(summary.metrics.sleepMinutesAsleep).toBeNull();
+    expect(summary.metrics.sleepMinutesInBed).toBeNull();
+  });
 });

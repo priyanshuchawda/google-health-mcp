@@ -90,6 +90,26 @@ function sleepSessions(sleep: JsonRecord): JsonRecord[] {
   return Array.isArray(points) ? points.map(object) : [];
 }
 
+/** Stage entries are a timeline, so overlapping or invalid intervals are ambiguous. */
+function hasValidNonOverlappingStages(stages: readonly JsonRecord[]): boolean {
+  const intervals = stages.map((stage) => ({
+    start: Date.parse(String(stage["startTime"] ?? "")),
+    end: Date.parse(String(stage["endTime"] ?? "")),
+  }));
+  if (
+    intervals.some(
+      ({ start, end }) =>
+        !Number.isFinite(start) || !Number.isFinite(end) || end <= start,
+    )
+  )
+    return false;
+  intervals.sort((a, b) => a.start - b.start);
+  return intervals.every(
+    (interval, index) =>
+      index === 0 || interval.start >= intervals[index - 1]!.end,
+  );
+}
+
 export function buildDailySummary(input: DailySummaryInput): JsonRecord {
   dateParts(input.date);
   if (input.timeZone !== null) {
@@ -197,10 +217,10 @@ export function buildDailySummary(input: DailySummaryInput): JsonRecord {
   );
   const hasUnknownSleepInterval = ordered.some((session) => {
     if (!session.startTime || !session.endTime) return true;
-    return (
-      !Number.isFinite(Date.parse(session.startTime)) ||
-      !Number.isFinite(Date.parse(session.endTime))
-    );
+    const start = Date.parse(session.startTime);
+    const end = Date.parse(session.endTime);
+    // Treat reversed and zero-length sessions as invalid, not as zero sleep.
+    return !Number.isFinite(start) || !Number.isFinite(end) || end <= start;
   });
   const sleepMinutesAsleep =
     ordered.length === 0 ||
@@ -237,6 +257,7 @@ export function buildDailySummary(input: DailySummaryInput): JsonRecord {
       }
 
       if (session.stageIntervals === null) return null;
+      if (!hasValidNonOverlappingStages(session.stageIntervals)) return null;
       const matching = session.stageIntervals.filter(
         (segment) => segment["type"] === stage,
       );
@@ -254,8 +275,12 @@ export function buildDailySummary(input: DailySummaryInput): JsonRecord {
   const primarySleep =
     ordered.find((session) => session.mainSleep === true) ??
     (() => {
-      const nonNaps = ordered.filter((session) => session.nap !== true);
-      return nonNaps.length === 1 ? nonNaps[0] : undefined;
+      // Do not infer primary sleep from a nap or a session explicitly marked
+      // mainSleep=false; use a fallback only when one candidate remains.
+      const candidates = ordered.filter(
+        (session) => session.nap !== true && session.mainSleep !== false,
+      );
+      return candidates.length === 1 ? candidates[0] : undefined;
     })();
   const publicSleepSessions = ordered.map((session) => {
     const output = { ...session };
@@ -298,8 +323,10 @@ export function buildDailySummary(input: DailySummaryInput): JsonRecord {
     },
     sleepSessions: publicSleepSessions,
     dataQuality: {
-      rollupTypesReturned: ROLLUP_TYPES.filter(
-        (type) => input.rollups[type] !== undefined,
+      // A successful empty rollup still carries rollupDataPoints: []. Failed
+      // or unsupported requests are represented by {}, so omit those here.
+      rollupTypesReturned: ROLLUP_TYPES.filter((type) =>
+        Array.isArray(input.rollups[type]?.["rollupDataPoints"]),
       ),
       unavailableMetrics: input.unavailableMetrics ?? [],
       sleepSessionCount: ordered.length,

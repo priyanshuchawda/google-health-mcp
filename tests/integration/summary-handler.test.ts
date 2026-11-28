@@ -44,6 +44,8 @@ describe("daily summary MCP handler", () => {
     expect(summary.dataQuality).toMatchObject({
       unavailableMetrics: [{ metric: "steps", reason: "request_failed" }],
     });
+    expect(summary.dataQuality.rollupTypesReturned).not.toContain("steps");
+    expect(summary.dataQuality.rollupTypesReturned).toContain("distance");
   });
 
   it("does not invent UTC when Google Health settings omit the time zone", async () => {
