@@ -6,8 +6,9 @@ import {
   type OAuthResourceAuth,
 } from "@cloudflare/workers-oauth-provider";
 import { createMcpHandler } from "@modelcontextprotocol/server";
-import { CodeChallengeMethod, OAuth2Client } from "google-auth-library";
+import { OAuth2Client } from "google-auth-library";
 import { allHealthScopes } from "./auth/scopes.js";
+import { googleAuthorizationOptions } from "./auth/google-authorization.js";
 import {
   renderConsentMarkup,
   selectedConsentScopes,
@@ -17,7 +18,6 @@ import { createHealthMcpServer } from "./server.js";
 
 const MCP_READ = "mcp:read";
 const MCP_WRITE = "mcp:write";
-const OIDC_SCOPES = ["openid", "email"];
 
 interface Env {
   OAUTH_KV: KVNamespace;
@@ -110,16 +110,14 @@ async function startGoogleAuthorization(
     } satisfies UpstreamState,
     headers,
   });
-  const location = client.generateAuthUrl({
-    access_type: "offline",
-    include_granted_scopes: true,
-    prompt: "consent",
-    scope: [...OIDC_SCOPES, ...googleScopes],
-    state: upstream.state,
-    nonce,
-    code_challenge: codeChallenge,
-    code_challenge_method: CodeChallengeMethod.S256,
-  });
+  const location = client.generateAuthUrl(
+    googleAuthorizationOptions({
+      googleScopes,
+      state: upstream.state,
+      nonce,
+      codeChallenge,
+    }),
+  );
   upstream.headers.set("location", location);
   return new Response(null, { status: 302, headers: upstream.headers });
 }

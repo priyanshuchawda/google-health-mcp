@@ -170,7 +170,7 @@ Cloudflare KV is required for OAuth authorization state and token/grant records.
 
 For local Worker development, copy `.dev.vars.example` to `.dev.vars`; edit only the synthetic loopback resource and test email unless you are intentionally testing the complete OAuth callback. `.dev.vars` is ignored by Git.
 
-After deployment, configure the MCP client with the Worker endpoint `https://<worker-name>.<your-subdomain>.workers.dev/mcp` and complete both consent steps. If the account uses Google OAuth Testing mode, refresh tokens can expire under Google's testing rules; configure the OAuth audience appropriately for personal use and verify the current Google policy.
+After deployment, configure the MCP client with the Worker endpoint `https://<worker-name>.<your-subdomain>.workers.dev/mcp` and complete both consent steps. The Google authorization token includes only the scopes requested for this connection; it deliberately does not merge older Google Fit grants, because Google Health can reject unrelated OAuth scopes. After changing the Google OAuth Data Access allowlist, reconnect once to issue a fresh Google grant. If the account uses Google OAuth Testing mode, refresh tokens can expire under Google's testing rules; configure the OAuth audience appropriately for personal use and verify the current Google policy.
 
 ### Self-hosting and public service scope
 
