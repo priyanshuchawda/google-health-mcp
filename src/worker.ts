@@ -18,6 +18,10 @@ import {
   signScopes,
 } from "./auth/consent.js";
 import { createHealthMcpServer } from "./server.js";
+import type {
+  HealthPreferences,
+  HealthPreferencesStore,
+} from "./tools/registry.js";
 
 const MCP_READ = "mcp:read";
 const MCP_WRITE = "mcp:write";
@@ -43,6 +47,55 @@ interface UpstreamState {
   verifier: string;
   nonce: string;
   googleScopes: string[];
+}
+
+const DEFAULT_HEALTH_PREFERENCES: HealthPreferences = {
+  dailyStepsGoal: 8_000,
+  sleepHoursGoal: 8,
+  hydrationMlGoal: 2_500,
+  weeklyExerciseMinutesGoal: 150,
+};
+
+function healthPreferencesStore(
+  kv: KVNamespace,
+  googleSubject: string,
+): HealthPreferencesStore {
+  const key = `health-preferences:${googleSubject}`;
+  return {
+    async read() {
+      const stored = await kv.get(key);
+      if (!stored) return { ...DEFAULT_HEALTH_PREFERENCES };
+      try {
+        const parsed = JSON.parse(stored) as Partial<HealthPreferences>;
+        return {
+          dailyStepsGoal:
+            typeof parsed.dailyStepsGoal === "number"
+              ? parsed.dailyStepsGoal
+              : DEFAULT_HEALTH_PREFERENCES.dailyStepsGoal,
+          sleepHoursGoal:
+            typeof parsed.sleepHoursGoal === "number"
+              ? parsed.sleepHoursGoal
+              : DEFAULT_HEALTH_PREFERENCES.sleepHoursGoal,
+          hydrationMlGoal:
+            typeof parsed.hydrationMlGoal === "number"
+              ? parsed.hydrationMlGoal
+              : DEFAULT_HEALTH_PREFERENCES.hydrationMlGoal,
+          weeklyExerciseMinutesGoal:
+            typeof parsed.weeklyExerciseMinutesGoal === "number"
+              ? parsed.weeklyExerciseMinutesGoal
+              : DEFAULT_HEALTH_PREFERENCES.weeklyExerciseMinutesGoal,
+        };
+      } catch {
+        return { ...DEFAULT_HEALTH_PREFERENCES };
+      }
+    },
+    async update(set) {
+      const current = await this.read();
+      const updated = { ...current, ...set };
+      await kv.put(key, JSON.stringify(updated));
+      return updated;
+    },
+  };
 }
 
 // Keep the shared server/tool layer independent of transport and OAuth. Google
@@ -392,6 +445,7 @@ function workerMcpHandler(
           requestedGoogleScopes: props.requestedGoogleScopes ?? [],
           resourceMetadataUrl: `${new URL(env.MCP_RESOURCE).origin}/.well-known/oauth-protected-resource/mcp`,
         },
+        preferences: healthPreferencesStore(env.OAUTH_KV, props.subject),
       },
     ),
   );
