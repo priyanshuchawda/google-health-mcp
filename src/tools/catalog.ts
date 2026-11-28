@@ -18,6 +18,18 @@ const prefix = "health.users.dataTypes.dataPoints.";
 
 export const toolCatalog: readonly HealthToolDefinition[] = Object.freeze([
   {
+    name: "get_connection_permissions",
+    title: "Get connection permissions",
+    description:
+      "Report the current MCP read/write grant and which documented Google Health data types and operations are enabled by the user's Google consent. Never returns credentials or health records.",
+    methodIds: [],
+    annotations: {
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  {
     name: "list_data_types",
     title: "List Google Health data types",
     description:

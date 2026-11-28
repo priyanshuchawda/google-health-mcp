@@ -6,10 +6,20 @@ import { registerSharedLinkTools } from "./shared-links.js";
 import { registerSummaryTool } from "./summaries.js";
 import { registerWebhookTools } from "./webhooks.js";
 import { registerDiscoveryTools } from "./discovery.js";
+import { registerConnectionPermissionsTool } from "./permissions.js";
+import { secureRemoteToolServer } from "./security.js";
+
+export interface RemoteAuthorizationState {
+  mcpScopes: readonly string[];
+  googleHealthScopes: readonly string[];
+  requestedGoogleScopes?: readonly string[];
+  resourceMetadataUrl: string;
+}
 
 export interface HealthToolOptions {
   projectAdminToolsEnabled?: boolean;
   googleCloudProjectNumber?: string;
+  remoteAuthorization?: RemoteAuthorizationState;
 }
 
 /** Registers the shared, transport-independent health tool set. */
@@ -18,6 +28,13 @@ export function registerHealthTools(
   api: HealthApi,
   options: HealthToolOptions = {},
 ): void {
+  if (options.remoteAuthorization) {
+    secureRemoteToolServer(
+      server,
+      options.remoteAuthorization.resourceMetadataUrl,
+    );
+    registerConnectionPermissionsTool(server, options.remoteAuthorization);
+  }
   registerDiscoveryTools(server);
   registerRecordTools(server, api);
   registerSummaryTool(server, api);

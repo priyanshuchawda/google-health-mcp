@@ -28,4 +28,21 @@ describe("Google OAuth scope selection", () => {
       "https://www.googleapis.com/auth/googlehealth.ecg.writeonly",
     );
   });
+
+  it("covers the complete documented set of 18 Google Health scopes without project IAM", () => {
+    const scopes = allHealthScopes(true);
+    expect(scopes).toHaveLength(18);
+    expect(scopes).toContain(
+      "https://www.googleapis.com/auth/googlehealth.ecg.readonly",
+    );
+    expect(scopes).toContain(
+      "https://www.googleapis.com/auth/googlehealth.logged_symptoms.writeonly",
+    );
+    expect(scopes).toContain(
+      "https://www.googleapis.com/auth/googlehealth.mindfulness.writeonly",
+    );
+    expect(scopes).not.toContain(
+      "https://www.googleapis.com/auth/cloud-platform",
+    );
+  });
 });

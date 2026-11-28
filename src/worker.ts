@@ -8,7 +8,9 @@ import {
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { OAuth2Client } from "google-auth-library";
 import { allHealthScopes } from "./auth/scopes.js";
-import { compareGrantedScopes } from "./auth/granted-scopes.js";
+import { acceptedHealthScopes } from "./auth/granted-scopes.js";
+import { InsufficientHealthPermissionError } from "./auth/permission-errors.js";
+import { advertiseSupportedMcpScopes } from "./auth/resource-metadata.js";
 import { googleAuthorizationOptions } from "./auth/google-authorization.js";
 import {
   renderConsentMarkup,
@@ -34,6 +36,7 @@ interface GoogleGrant {
   email: string;
   refreshToken: string;
   googleScopes: string[];
+  requestedGoogleScopes?: string[];
 }
 
 interface UpstreamState {
@@ -245,10 +248,10 @@ async function handleGoogleCallback(
     code,
     codeVerifier: resumed.data.verifier,
   });
-  if (!tokens.id_token || !tokens.refresh_token)
+  if (!tokens.id_token)
     return htmlPage(
       "Google access incomplete",
-      "<p>Google did not return the required identity and offline-access credentials. Revoke access and authorize again.</p>",
+      "<p>Google did not return the identity token needed to verify the authorized account. No authorization was saved. Reconnect this MCP and try again.</p>",
       400,
     );
 
@@ -269,23 +272,35 @@ async function handleGoogleCallback(
       403,
     );
 
-  const actualScopes = (tokens.scope ?? "").split(/\s+/).filter(Boolean);
-  const { missing, unexpected } = compareGrantedScopes(
-    actualScopes,
-    resumed.data.googleScopes,
-    ["openid", "email", "https://www.googleapis.com/auth/userinfo.email"],
-  );
-  if (unexpected.length)
+  // Google omits `scope` when the grant equals the requested set. In that
+  // case, the upstream request scope list is the granted set; partial grants
+  // are returned explicitly and are handled below.
+  const actualScopes = (tokens.scope ?? resumed.data.googleScopes.join(" "))
+    .split(/\s+/)
+    .filter(Boolean);
+  let grantedHealthScopes: string[];
+  try {
+    grantedHealthScopes = acceptedHealthScopes(
+      actualScopes,
+      resumed.data.googleScopes,
+      ["openid", "email", "https://www.googleapis.com/auth/userinfo.email"],
+    ).healthScopes;
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    const title = error.message.includes("at least one scope")
+      ? "Google Health permission required"
+      : "Unexpected Google permissions";
     return htmlPage(
-      "Unexpected Google permissions",
-      `<p>Google returned ${unexpected.length} permission(s) that were not requested. No authorization was saved. Disconnect only this MCP connection, then reconnect and approve its listed permissions.</p>`,
+      title,
+      `<p>${escapeHtml(error.message)} No authorization was saved. Grant at least one Google Health category and reconnect this MCP connection.</p>`,
       403,
     );
-  if (missing.length)
+  }
+  if (!tokens.refresh_token)
     return htmlPage(
-      "Google Health permissions incomplete",
-      `<p>Google did not grant all requested permissions. Missing scope count: ${missing.length}.</p>`,
-      403,
+      "Google offline access incomplete",
+      "<p>Google did not return the refresh token needed for background-free, on-demand API access. No authorization was saved. Reconnect this MCP and approve offline access.</p>",
+      400,
     );
 
   const redirect = await oauth.completeAuthorization({
@@ -297,9 +312,8 @@ async function handleGoogleCallback(
       subject: identity.sub,
       email: identity.email,
       refreshToken: tokens.refresh_token,
-      googleScopes: actualScopes.filter((scope) =>
-        scope.startsWith("https://www.googleapis.com/auth/googlehealth."),
-      ),
+      googleScopes: grantedHealthScopes,
+      requestedGoogleScopes: resumed.data.googleScopes,
     } satisfies GoogleGrant,
   });
   resumed.headers.set("location", redirect.redirectTo);
@@ -319,16 +333,29 @@ class GoogleHealthTokenProvider {
   }
 
   async getAccessToken(scopes: readonly string[]): Promise<string> {
-    if (scopes.some((scope) => !this.grant.googleScopes.includes(scope)))
-      throw new Error(
-        "The Google account has not granted a required Health API permission.",
+    const missingGoogleScopes = scopes.filter(
+      (scope) => !this.grant.googleScopes.includes(scope),
+    );
+    if (missingGoogleScopes.length) {
+      const categories = missingGoogleScopes
+        .map((scope) => scope.split("googlehealth.").at(-1))
+        .filter(Boolean)
+        .join(", ");
+      const writeNeeded = missingGoogleScopes.some((scope) =>
+        scope.endsWith(".writeonly"),
       );
+      throw new InsufficientHealthPermissionError(
+        `Google Health permission is missing for: ${categories}. Reconnect this MCP and grant the relevant Google Health category; granular consent can be enabled per category.`,
+        writeNeeded ? [MCP_READ, MCP_WRITE] : [MCP_READ],
+      );
+    }
     if (
       scopes.some((scope) => scope.endsWith(".writeonly")) &&
       !this.mcpScopes.includes(MCP_WRITE)
     )
-      throw new Error(
-        "This MCP client has read-only authorization; request write access first.",
+      throw new InsufficientHealthPermissionError(
+        "This MCP connection has read-only authorization. Reconnect and grant mcp:write to enable supported changes.",
+        [MCP_READ, MCP_WRITE],
       );
     const token = await this.google.getAccessToken();
     if (!token.token)
@@ -356,7 +383,17 @@ function workerMcpHandler(
     );
   const tokenProvider = new GoogleHealthTokenProvider(env, props, mcpScopes);
   const handler = createMcpHandler(() =>
-    createHealthMcpServer({ tokenProvider }),
+    createHealthMcpServer(
+      { tokenProvider },
+      {
+        remoteAuthorization: {
+          mcpScopes,
+          googleHealthScopes: props.googleScopes,
+          requestedGoogleScopes: props.requestedGoogleScopes ?? [],
+          resourceMetadataUrl: `${new URL(env.MCP_RESOURCE).origin}/.well-known/oauth-protected-resource/mcp`,
+        },
+      },
+    ),
   );
   return handler.fetch(request);
 }
@@ -423,7 +460,15 @@ function createProvider(env: Env): OAuthProvider<Env> {
 }
 
 export default {
-  fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    return createProvider(env).fetch(request, env, ctx);
+  async fetch(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<Response> {
+    const response = await createProvider(env).fetch(request, env, ctx);
+    const path = new URL(request.url).pathname;
+    if (path === "/.well-known/oauth-protected-resource/mcp")
+      return advertiseSupportedMcpScopes(response);
+    return response;
   },
 };

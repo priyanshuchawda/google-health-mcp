@@ -32,6 +32,9 @@ describe("remote OAuth consent form", () => {
     const form = html.match(/<form\b[\s\S]*?<\/form>/)?.[0] ?? "";
     expect(form).toContain('name="scope" value="mcp:read" checked');
     expect(form).toContain('name="scope" value="mcp:write">');
+    expect(form).toContain(
+      "Allow creating, updating, and deleting supported health records (optional)",
+    );
     expect(form).toContain('name="handle" value="opaque-consent-handle"');
   });
 
