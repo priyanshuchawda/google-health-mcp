@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   apiMethods,
   assertOperationAllowed,
+  defaultApiVersionForDataType,
   dataTypes,
   getApiMethod,
   getCapability,
@@ -9,7 +10,7 @@ import {
 } from "../../src/google-health/capabilities.js";
 
 describe("Google Health capability contract", () => {
-  it("includes the complete official stable data-type catalog", () => {
+  it("includes the documented data-type catalog and marks beta-only entries", () => {
     expect(dataTypes).toHaveLength(44);
     expect(new Set(dataTypes.map((type) => type.slug)).size).toBe(
       dataTypes.length,
@@ -17,6 +18,11 @@ describe("Google Health capability contract", () => {
     expect(getCapability("skin-temperature-sensors")?.operations).toEqual([
       "list",
     ]);
+    expect(getCapability("skin-temperature-sensors")?.beta).toBe(true);
+    expect(defaultApiVersionForDataType("skin-temperature-sensors")).toBe(
+      "v4beta",
+    );
+    expect(defaultApiVersionForDataType("steps")).toBe("v4");
     expect(getCapability("basal-energy-burned")).toBeUndefined();
     expect(getCapability("heart-rate")?.scopes).toContain(
       "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly",

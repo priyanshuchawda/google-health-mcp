@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   apiSchemas,
   dataTypes,
+  defaultApiVersionForDataType,
   getApiMethod,
   getCapability,
 } from "../google-health/capabilities.js";
@@ -206,17 +207,19 @@ export function registerDiscoveryTools(server: McpServer): void {
       inputSchema: z.object({
         dataType: z.string().min(1).max(80),
         operation: operationSchema.optional(),
-        apiVersion: z.enum(["v4", "v4beta"]).default("v4"),
+        apiVersion: z.enum(["v4", "v4beta"]).optional(),
       }),
       outputSchema: toolOutputSchema,
     },
     async ({ dataType, operation, apiVersion }) => {
-      const version = apiVersion ?? "v4";
       const capability = getCapability(dataType);
       if (!capability)
         throw new TypeError(
           `Unsupported Google Health data type: ${dataType}. Call list_data_types to see supported data types.`,
         );
+      const version = apiVersion ?? defaultApiVersionForDataType(dataType);
+      if (capability.beta === true && version !== "v4beta")
+        throw new TypeError(`${dataType} is documented only in v4beta.`);
       const operations = operation ? [operation] : capability.operations;
       const methods = operations.map((requestedOperation) => {
         if (!capability.operations.includes(requestedOperation))

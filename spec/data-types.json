@@ -388,6 +388,7 @@
       "slug": "skin-temperature-sensors",
       "kind": "Sample",
       "filterParameter": "skin_temperature_sensors",
+      "beta": true,
       "scopes": [
         "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly",
         "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.writeonly"

@@ -97,6 +97,11 @@ export function getCapability(slug: string): HealthDataType | undefined {
   return dataTypeIndex.get(slug);
 }
 
+/** Selects beta only for catalog entries that Google explicitly marks beta-only. */
+export function defaultApiVersionForDataType(slug: string): "v4" | "v4beta" {
+  return getCapability(slug)?.beta === true ? "v4beta" : "v4";
+}
+
 export function assertOperationAllowed(
   slug: string,
   operation: HealthOperation,

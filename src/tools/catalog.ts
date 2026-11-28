@@ -66,6 +66,42 @@ export const toolCatalog: readonly HealthToolDefinition[] = Object.freeze([
     },
   },
   {
+    name: "get_health_summary",
+    title: "Get a health summary for a date range",
+    description:
+      "Summarize up to 31 consecutive civil dates using Google daily rollups and reconciled sleep and exercise records. Returns per-day values, observed totals/averages, missing-data counts, and first-half versus second-half comparisons. Dates follow the civil dates recorded with source measurements.",
+    methodIds: [],
+    annotations: {
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  {
+    name: "get_data_freshness",
+    title: "Check health data freshness",
+    description:
+      "Inspect a bounded set of Google Health data types and report the newest record timestamp returned, its source, and age. Measurement time is not a guaranteed upload or synchronization timestamp.",
+    methodIds: [],
+    annotations: {
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  {
+    name: "log_workout",
+    title: "Log a workout",
+    description:
+      "Create one manually logged Google Health exercise session from timezone-aware start/end timestamps and optional summary metrics. This creates a health record and does not fabricate intraday steps or heart-rate samples.",
+    methodIds: [],
+    annotations: {
+      readOnlyHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+  },
+  {
     name: "get_health_data",
     title: "Get Google Health data",
     description:

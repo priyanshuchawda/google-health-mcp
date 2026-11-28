@@ -22,6 +22,9 @@ describe("Google Health MCP stdio protocol", () => {
       const { tools } = await client.listTools();
       expect(tools.map((tool) => tool.name)).toContain("list_data_types");
       expect(tools.map((tool) => tool.name)).toContain("describe_schema");
+      expect(tools.map((tool) => tool.name)).toContain("get_health_summary");
+      expect(tools.map((tool) => tool.name)).toContain("get_data_freshness");
+      expect(tools.map((tool) => tool.name)).toContain("log_workout");
 
       const result = await client.callTool({
         name: "list_data_types",

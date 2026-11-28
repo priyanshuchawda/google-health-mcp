@@ -36,6 +36,9 @@ describe("MCP schema discovery tools", () => {
       kind: "Session",
       operations: expect.arrayContaining(["list", "create", "patch"]),
     });
+    expect(
+      types.find((item) => item["slug"] === "skin-temperature-sensors"),
+    ).toMatchObject({ beta: true, operations: ["list"] });
     for (const unsupported of [
       "basal-energy-burned",
       "heart-rate-variability-personal-range",
@@ -94,5 +97,19 @@ describe("MCP schema discovery tools", () => {
         .get("describe_schema")!
         .handler({ dataType: "basal-energy-burned" } as never),
     ).rejects.toThrow(/unsupported google health data type/i);
+  });
+
+  it("automatically describes the beta-only skin-temperature schema using v4beta", async () => {
+    const tools = captureTools();
+    const result = (await tools.get("describe_schema")!.handler({
+      dataType: "skin-temperature-sensors",
+      operation: "list",
+    } as never)) as {
+      structuredContent: {
+        data: { apiVersion: string; methods: Array<{ path: string }> };
+      };
+    };
+    expect(result.structuredContent.data.apiVersion).toBe("v4beta");
+    expect(result.structuredContent.data.methods[0]?.path).toContain("v4beta/");
   });
 });

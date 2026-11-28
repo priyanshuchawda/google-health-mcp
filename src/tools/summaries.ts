@@ -2,13 +2,14 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
   assertOperationAllowed,
+  defaultApiVersionForDataType,
   getCapability,
 } from "../google-health/capabilities.js";
 import type { HealthApi } from "../google-health/client.js";
 import { toolCatalog } from "./catalog.js";
 import { toolOutputSchema, toolResult } from "./results.js";
 
-type JsonRecord = Record<string, unknown>;
+export type JsonRecord = Record<string, unknown>;
 type RollupMap = Readonly<Record<string, JsonRecord>>;
 
 export interface DailySummaryInput {
@@ -16,10 +17,15 @@ export interface DailySummaryInput {
   timeZone: string | null;
   rollups: RollupMap;
   sleep: JsonRecord;
+  dailyMeasurements?: {
+    restingHeartRate?: JsonRecord | undefined;
+    heartRateVariability?: JsonRecord | undefined;
+  };
+  exerciseSessions?: JsonRecord[] | undefined;
   unavailableMetrics?: { metric: string; reason: string }[];
 }
 
-const ROLLUP_TYPES = [
+export const ROLLUP_TYPES = [
   "steps",
   "distance",
   "active-energy-burned",
@@ -31,7 +37,7 @@ const ROLLUP_TYPES = [
   "nutrition-log",
 ] as const;
 
-function object(value: unknown): JsonRecord {
+export function object(value: unknown): JsonRecord {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as JsonRecord)
     : {};
@@ -42,7 +48,7 @@ function firstRollup(rollups: RollupMap, type: string): JsonRecord {
   return Array.isArray(points) && points.length > 0 ? object(points[0]) : {};
 }
 
-function finiteNumber(value: unknown): number | null {
+export function finiteNumber(value: unknown): number | null {
   if (typeof value !== "string" && typeof value !== "number") return null;
   if (typeof value === "string" && value.trim() === "") return null;
   const parsed = Number(value);
@@ -64,7 +70,11 @@ function readMetric(
   return finiteNumber(object(point[family])[field]);
 }
 
-function dateParts(date: string): { year: number; month: number; day: number } {
+export function dateParts(date: string): {
+  year: number;
+  month: number;
+  day: number;
+} {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
     throw new TypeError("date must be a valid YYYY-MM-DD civil date.");
   const [year, month, day] = date.split("-").map(Number);
@@ -83,6 +93,74 @@ export function nextCivilDate(date: string): string {
   const { year, month, day } = dateParts(date);
   const next = new Date(Date.UTC(year, month - 1, day + 1));
   return `${next.getUTCFullYear().toString().padStart(4, "0")}-${String(next.getUTCMonth() + 1).padStart(2, "0")}-${String(next.getUTCDate()).padStart(2, "0")}`;
+}
+
+export function civilDateFromValue(value: unknown): string | null {
+  const wrapped = object(value);
+  const date = object(wrapped["date"] ?? value);
+  const year = finiteNumber(date["year"]);
+  const month = finiteNumber(date["month"]);
+  const day = finiteNumber(date["day"]);
+  if (year === null || month === null || day === null) return null;
+  const candidate = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  try {
+    dateParts(candidate);
+    return candidate;
+  } catch {
+    return null;
+  }
+}
+
+export function dateObject(date: string): JsonRecord {
+  return dateParts(date);
+}
+
+function pointDate(point: JsonRecord, field: string): string | null {
+  return civilDateFromValue(object(point[field])["date"]);
+}
+
+export function daysBetween(start: string, endExclusive: string): number {
+  return (
+    (Date.parse(`${endExclusive}T00:00:00Z`) -
+      Date.parse(`${start}T00:00:00Z`)) /
+    86_400_000
+  );
+}
+
+export function datesInRange(start: string, endExclusive: string): string[] {
+  const count = daysBetween(start, endExclusive);
+  if (!Number.isInteger(count) || count < 1 || count > 31)
+    throw new TypeError(
+      "Date range must contain 1 to 31 valid consecutive civil dates.",
+    );
+  const dates: string[] = [];
+  for (let date = start; date < endExclusive; date = nextCivilDate(date))
+    dates.push(date);
+  return dates;
+}
+
+function durationSeconds(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const match = value.match(/^(\d+(?:\.\d+)?)s$/);
+  if (!match) return null;
+  const seconds = Number(match[1]);
+  return Number.isFinite(seconds) ? seconds : null;
+}
+
+function civilClock(value: unknown): string | null {
+  const time = object(object(value)["time"]);
+  const hours = finiteNumber(time["hours"]);
+  const minutes = finiteNumber(time["minutes"]);
+  if (
+    hours === null ||
+    minutes === null ||
+    hours < 0 ||
+    hours > 23 ||
+    minutes < 0 ||
+    minutes > 59
+  )
+    return null;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
 function sleepSessions(sleep: JsonRecord): JsonRecord[] {
@@ -167,6 +245,14 @@ export function buildDailySummary(input: DailySummaryInput): JsonRecord {
     : null;
   const nutritionPoint = firstRollup(input.rollups, "nutrition-log");
   const nutrition = object(nutritionPoint["nutrition"]);
+  const restingHeartRate = object(
+    object(input.dailyMeasurements?.restingHeartRate)["dailyRestingHeartRate"],
+  );
+  const dailyHrv = object(
+    object(input.dailyMeasurements?.heartRateVariability)[
+      "dailyHeartRateVariability"
+    ],
+  );
   const sleepPoints = sleepSessions(input.sleep);
   const ordered = sleepPoints
     .map((point) => {
@@ -187,6 +273,8 @@ export function buildDailySummary(input: DailySummaryInput): JsonRecord {
             : null,
         endTime:
           typeof interval["endTime"] === "string" ? interval["endTime"] : null,
+        civilStartTime: interval["civilStartTime"] ?? null,
+        civilEndTime: interval["civilEndTime"] ?? null,
         minutesAsleep: finiteNumber(summary["minutesAsleep"]),
         minutesInSleepPeriod: finiteNumber(summary["minutesInSleepPeriod"]),
         mainSleep:
@@ -288,6 +376,41 @@ export function buildDailySummary(input: DailySummaryInput): JsonRecord {
     Reflect.deleteProperty(output, "stageIntervals");
     return output;
   });
+  const exercises = (input.exerciseSessions ?? []).map((point) => {
+    const exercise = object(point["exercise"]);
+    const interval = object(exercise["interval"]);
+    const metricsSummary = object(exercise["metricsSummary"]);
+    const duration = durationSeconds(exercise["activeDuration"]);
+    const millimeters = finiteNumber(metricsSummary["distanceMillimeters"]);
+    return {
+      name: typeof point["name"] === "string" ? point["name"] : null,
+      exerciseType:
+        typeof exercise["exerciseType"] === "string"
+          ? exercise["exerciseType"]
+          : null,
+      displayName:
+        typeof exercise["displayName"] === "string"
+          ? exercise["displayName"]
+          : null,
+      startTime:
+        typeof interval["startTime"] === "string"
+          ? interval["startTime"]
+          : null,
+      endTime:
+        typeof interval["endTime"] === "string" ? interval["endTime"] : null,
+      activeMinutes: duration === null ? null : Math.round(duration / 60),
+      caloriesKcal: finiteNumber(metricsSummary["caloriesKcal"]),
+      distanceMeters: millimeters === null ? null : millimeters / 1000,
+    };
+  });
+  const exerciseMinutes = exercises.some(
+    (exercise) => exercise.activeMinutes === null,
+  )
+    ? null
+    : exercises.reduce<number | null>((total, exercise) => {
+        const minutes = finiteNumber(exercise.activeMinutes);
+        return minutes === null ? total : (total ?? 0) + minutes;
+      }, null);
 
   return {
     date: input.date,
@@ -301,6 +424,22 @@ export function buildDailySummary(input: DailySummaryInput): JsonRecord {
       totalCalories: metric(totalCalories, "kcal"),
       activeMinutes: metric(activeMinutes, "min"),
       averageHeartRate: metric(heartRate, "bpm"),
+      restingHeartRate: metric(
+        finiteNumber(restingHeartRate["beatsPerMinute"]),
+        "bpm",
+      ),
+      heartRateVariability: metric(
+        finiteNumber(dailyHrv["averageHeartRateVariabilityMilliseconds"]),
+        "ms",
+      ),
+      heartRateVariabilityDeepSleepRmssd: metric(
+        finiteNumber(
+          dailyHrv[
+            "deepSleepRootMeanSquareOfSuccessiveDifferencesMilliseconds"
+          ],
+        ),
+        "ms",
+      ),
       averageWeight: metric(weight === null ? null : weight / 1000, "kg"),
       hydration: metric(hydration, "ml"),
       nutrition,
@@ -320,8 +459,24 @@ export function buildDailySummary(input: DailySummaryInput): JsonRecord {
             endTime: primarySleep.endTime,
           }
         : null,
+      primarySleepLocalTimes: primarySleep
+        ? {
+            bedtime: civilClock(primarySleep.civilStartTime),
+            wakeTime: civilClock(primarySleep.civilEndTime),
+          }
+        : null,
+      exerciseCount:
+        input.exerciseSessions === undefined ? null : exercises.length,
+      exerciseMinutes: metric(
+        exerciseMinutes === null && exercises.length > 0
+          ? null
+          : (exerciseMinutes ??
+              (input.exerciseSessions === undefined ? null : 0)),
+        "min",
+      ),
     },
     sleepSessions: publicSleepSessions,
+    exerciseSessions: input.exerciseSessions === undefined ? null : exercises,
     dataQuality: {
       // A successful empty rollup still carries rollupDataPoints: []. Failed
       // or unsupported requests are represented by {}, so omit those here.
@@ -464,6 +619,41 @@ export function registerSummaryTool(server: McpServer, api: HealthApi): void {
           });
         }
       }
+      const [restingResult, hrvResult, exerciseResult] =
+        await Promise.allSettled([
+          fetchDailyRecords(
+            api,
+            "daily-resting-heart-rate",
+            date,
+            nextCivilDate(date),
+          ),
+          fetchDailyRecords(
+            api,
+            "daily-heart-rate-variability",
+            date,
+            nextCivilDate(date),
+          ),
+          fetchBoundedSessions(api, "exercise", date, nextCivilDate(date)),
+        ]);
+      const firstRecord = (
+        result: PromiseSettledResult<Map<string, JsonRecord>>,
+        type: string,
+      ) => {
+        if (result.status === "fulfilled") return result.value.get(date);
+        unavailableMetrics.push({
+          metric: type,
+          reason: "request_failed_or_incomplete",
+        });
+        return undefined;
+      };
+      const exerciseSessions =
+        exerciseResult.status === "fulfilled"
+          ? exerciseResult.value
+          : (unavailableMetrics.push({
+              metric: "exercise",
+              reason: "request_failed_or_incomplete",
+            }),
+            undefined);
       const sleep = { dataPoints: sleepPoints };
       return toolResult(
         buildDailySummary({
@@ -471,9 +661,87 @@ export function registerSummaryTool(server: McpServer, api: HealthApi): void {
           timeZone,
           rollups,
           sleep,
+          dailyMeasurements: {
+            restingHeartRate: firstRecord(
+              restingResult,
+              "daily-resting-heart-rate",
+            ),
+            heartRateVariability: firstRecord(
+              hrvResult,
+              "daily-heart-rate-variability",
+            ),
+          },
+          exerciseSessions,
           unavailableMetrics,
         }),
       );
     },
   );
+}
+
+function dateMapFromPoints(
+  points: unknown,
+  field: string,
+): Map<string, JsonRecord> {
+  const result = new Map<string, JsonRecord>();
+  if (!Array.isArray(points)) return result;
+  for (const value of points) {
+    const point = object(value);
+    const date = pointDate(point, field);
+    if (date) result.set(date, point);
+  }
+  return result;
+}
+
+export async function fetchDailyRecords(
+  api: HealthApi,
+  dataType: "daily-resting-heart-rate" | "daily-heart-rate-variability",
+  start: string,
+  endExclusive: string,
+): Promise<Map<string, JsonRecord>> {
+  assertOperationAllowed(dataType, "list");
+  const capability = getCapability(dataType)!;
+  const result = await api.request<JsonRecord>({
+    methodId: "health.users.dataTypes.dataPoints.list",
+    apiVersion: defaultApiVersionForDataType(dataType),
+    pathParams: { parent: `users/me/dataTypes/${dataType}` },
+    query: {
+      filter: `${capability.filterParameter}.date >= "${start}" AND ${capability.filterParameter}.date < "${endExclusive}"`,
+      pageSize: 90,
+    },
+  });
+  const field =
+    dataType === "daily-resting-heart-rate"
+      ? "dailyRestingHeartRate"
+      : "dailyHeartRateVariability";
+  return dateMapFromPoints(result["dataPoints"], field);
+}
+
+export async function fetchBoundedSessions(
+  api: HealthApi,
+  dataType: "sleep" | "exercise",
+  start: string,
+  endExclusive: string,
+): Promise<JsonRecord[]> {
+  assertOperationAllowed(dataType, "reconcile");
+  const field = dataType === "sleep" ? "civil_end_time" : "civil_start_time";
+  const filter = `${dataType}.interval.${field} >= "${start}" AND ${dataType}.interval.${field} < "${endExclusive}"`;
+  const records: JsonRecord[] = [];
+  let pageToken: string | undefined;
+  // Session endpoints cap pages at 25; this keeps a summary bounded to 250 sessions.
+  for (let page = 0; page < 10; page += 1) {
+    const result = await api.request<JsonRecord>({
+      methodId: "health.users.dataTypes.dataPoints.reconcile",
+      pathParams: { parent: `users/me/dataTypes/${dataType}` },
+      query: { filter, pageSize: 25, ...(pageToken ? { pageToken } : {}) },
+    });
+    const points = result["dataPoints"];
+    if (!Array.isArray(points))
+      throw new TypeError(`Missing ${dataType} records in API response.`);
+    records.push(...points.map(object));
+    const next = result["nextPageToken"];
+    pageToken = typeof next === "string" && next ? next : undefined;
+    if (!pageToken) return records;
+  }
+  throw new TypeError(`${dataType} session page limit reached.`);
 }

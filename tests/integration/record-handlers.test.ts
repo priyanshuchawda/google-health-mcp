@@ -137,6 +137,30 @@ describe("record MCP handlers", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
+  it("automatically selects v4beta for beta-only skin-temperature readings", async () => {
+    const fetchImpl = vi.fn(async () => Response.json({ dataPoints: [] }));
+    const api = new HealthApi({
+      tokenProvider: { getAccessToken: async () => "synthetic-token" },
+      fetchImpl,
+    });
+    const getData = captureTools(api).get("get_health_data")!;
+    await getData({
+      dataType: "skin-temperature-sensors",
+      operation: "list",
+    } as never);
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
+      "https://health.googleapis.com/v4beta/users/me/dataTypes/skin-temperature-sensors/dataPoints",
+    );
+    await expect(
+      getData({
+        dataType: "skin-temperature-sensors",
+        operation: "list",
+        apiVersion: "v4",
+      } as never),
+    ).rejects.toThrow(/documented only in v4beta/i);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it("runs a synthetic create, read, update, and delete round trip through HealthApi and MCP handlers", async () => {
     const recordId = "synthetic-water-1";
     const googleName = `users/1234567890/dataTypes/hydration-log/dataPoints/${recordId}`;

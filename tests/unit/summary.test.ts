@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildDailySummary, nextCivilDate } from "../../src/tools/summaries.js";
+import { buildRangeSummary } from "../../src/tools/range-summary.js";
 
 describe("daily Google Health summary", () => {
   it("converts supported rollup units and keeps absent measurements null", () => {
@@ -317,5 +318,78 @@ describe("daily Google Health summary", () => {
 
     expect(summary.metrics.sleepMinutesAsleep).toBeNull();
     expect(summary.metrics.sleepMinutesInBed).toBeNull();
+  });
+
+  it("keeps exercise duration missing when any returned session lacks it", () => {
+    const summary = buildDailySummary({
+      date: "2026-11-26",
+      timeZone: "Asia/Kolkata",
+      rollups: {},
+      sleep: { dataPoints: [] },
+      exerciseSessions: [
+        {
+          exercise: {
+            interval: {
+              startTime: "2026-11-26T05:00:00Z",
+              endTime: "2026-11-26T05:30:00Z",
+            },
+            activeDuration: "1800s",
+          },
+        },
+        {
+          exercise: {
+            interval: {
+              startTime: "2026-11-26T07:00:00Z",
+              endTime: "2026-11-26T07:15:00Z",
+            },
+          },
+        },
+      ],
+    });
+
+    expect(summary.metrics.exerciseCount).toBe(2);
+    expect(summary.metrics.exerciseMinutes).toBeNull();
+  });
+
+  it("uses circular civil-clock statistics for bedtime consistency and keeps missing days out", () => {
+    const rows = [
+      {
+        date: "2026-11-01",
+        metrics: {
+          steps: { value: 100, unit: "steps" },
+          primarySleepLocalTimes: { bedtime: "23:50", wakeTime: "07:10" },
+        },
+      },
+      {
+        date: "2026-11-02",
+        metrics: {
+          steps: null,
+          primarySleepLocalTimes: { bedtime: "00:10", wakeTime: "07:00" },
+        },
+      },
+      {
+        date: "2026-11-03",
+        metrics: {
+          steps: { value: 300, unit: "steps" },
+          primarySleepLocalTimes: null,
+        },
+      },
+    ];
+    const summary = buildRangeSummary("2026-11-01", "2026-11-03", rows);
+    expect(summary.totals.steps).toMatchObject({
+      value: 400,
+      daysReported: 2,
+      daysInRange: 3,
+    });
+    expect(summary.sleepTimingConsistency.bedtime).toMatchObject({
+      averageLocalTime: "00:00",
+      daysReported: 2,
+    });
+    expect(
+      summary.sleepTimingConsistency.bedtime.circularStdDevMinutes,
+    ).toBeLessThan(15);
+    expect(summary.sleepTimingConsistency.wakeTime.averageLocalTime).toBe(
+      "07:05",
+    );
   });
 });

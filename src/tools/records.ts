@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
   assertOperationAllowed,
+  defaultApiVersionForDataType,
   getCapability,
 } from "../google-health/capabilities.js";
 import type { HealthApi } from "../google-health/client.js";
@@ -109,7 +110,7 @@ export function registerRecordTools(server: McpServer, api: HealthApi): void {
       inputSchema: z.object({
         dataType: dataTypeNames,
         operation: operationRead,
-        apiVersion: API_VERSION.default("v4"),
+        apiVersion: API_VERSION.optional(),
         ...dateRangeSchema,
         pageSize: z.number().int().min(1).max(100).optional(),
         pageToken: z.string().min(1).max(4096).optional(),
@@ -126,7 +127,14 @@ export function registerRecordTools(server: McpServer, api: HealthApi): void {
           `Unsupported Google Health data type: ${input.dataType}.`,
         );
       assertOperationAllowed(input.dataType, input.operation);
-      if (input.apiVersion === "v4beta" && input.operation === "get") {
+      const apiVersion =
+        input.apiVersion ?? defaultApiVersionForDataType(input.dataType);
+      if (capability.beta === true && apiVersion !== "v4beta") {
+        throw new TypeError(
+          `${input.dataType} is documented only in v4beta; omit apiVersion to select it automatically or set apiVersion to v4beta.`,
+        );
+      }
+      if (apiVersion === "v4beta" && input.operation === "get") {
         throw new TypeError(
           "Individual record reads use the stable v4 endpoint only.",
         );
@@ -155,7 +163,7 @@ export function registerRecordTools(server: McpServer, api: HealthApi): void {
         return toolResult(
           await api.request({
             methodId: "health.users.dataTypes.dataPoints.get",
-            apiVersion: input.apiVersion,
+            apiVersion,
             pathParams: { name: recordName },
           }),
         );
@@ -183,7 +191,7 @@ export function registerRecordTools(server: McpServer, api: HealthApi): void {
         return toolResult(
           await api.request({
             methodId: `health.users.dataTypes.dataPoints.${input.operation}`,
-            apiVersion: input.apiVersion,
+            apiVersion,
             pathParams: { parent },
             body: input.requestBody,
           }),
@@ -223,7 +231,7 @@ export function registerRecordTools(server: McpServer, api: HealthApi): void {
       return toolResult(
         await api.request({
           methodId: `health.users.dataTypes.dataPoints.${input.operation}`,
-          apiVersion: input.apiVersion,
+          apiVersion,
           pathParams: { parent },
           query,
         }),

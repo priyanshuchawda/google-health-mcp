@@ -3,7 +3,10 @@ import type { HealthApi } from "../google-health/client.js";
 import { registerProfileTools } from "./profile.js";
 import { registerRecordTools } from "./records.js";
 import { registerSharedLinkTools } from "./shared-links.js";
+import { registerDataFreshnessTool } from "./freshness.js";
+import { registerRangeSummaryTool } from "./range-summary.js";
 import { registerSummaryTool } from "./summaries.js";
+import { registerWorkoutTool } from "./workouts.js";
 import { registerWebhookTools } from "./webhooks.js";
 import { registerDiscoveryTools } from "./discovery.js";
 import { registerConnectionPermissionsTool } from "./permissions.js";
@@ -37,7 +40,10 @@ export function registerHealthTools(
   }
   registerDiscoveryTools(server);
   registerRecordTools(server, api);
+  registerWorkoutTool(server, api);
   registerSummaryTool(server, api);
+  registerRangeSummaryTool(server, api);
+  registerDataFreshnessTool(server, api);
   registerProfileTools(server, api);
   registerSharedLinkTools(server, api);
   if (options.projectAdminToolsEnabled) {
